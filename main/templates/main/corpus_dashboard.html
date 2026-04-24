@@ -1,0 +1,53 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Corpus Dashboard{% endblock %}
+
+{% block content %}
+
+<h2 class="mb-4">Corpus Dashboard</h2>
+
+<a href="{% url 'upload_document' %}" class="btn btn-success mb-3">
+    + Upload New Document
+</a>
+
+<div class="row">
+  {% for doc in documents %}
+    <div class="col-md-6 mb-4">
+      <div class="card shadow-sm">
+        <div class="card-body">
+
+          <h5 class="card-title">{{ doc.title }}</h5>
+          <p class="text-muted">Uploaded: {{ doc.uploaded_at }}</p>
+
+          <div class="d-flex flex-wrap gap-2">
+
+            <a href="{% url 'word_frequency' doc.id %}" class="btn btn-primary btn-sm">
+              Word Frequency
+            </a>
+
+            <a href="{% url 'collocations' doc.id %}" class="btn btn-secondary btn-sm">
+              Collocations
+            </a>
+
+            <a href="{% url 'ngrams' doc.id %}" class="btn btn-success btn-sm">
+              N-grams
+            </a>
+
+            <a href="{% url 'kwic_legacy' doc.id %}" class="btn btn-warning btn-sm">
+              KWIC (Legacy)
+            </a>
+
+            <a href="{% url 'kwic_search' %}" class="btn btn-dark btn-sm">
+              KWIC (Fast)
+            </a>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  {% empty %}
+    <p>No documents available.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}

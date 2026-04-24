@@ -1,0 +1,26 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Word Frequency{% endblock %}
+
+{% block content %}
+<h2>Word Frequency: {{ document.title }}</h2>
+
+<table class="table">
+  <tr>
+    <th>Word</th>
+    <th>Count</th>
+  </tr>
+
+  {% for word, count in frequencies %}
+  <tr>
+    <td>{{ word }}</td>
+    <td>{{ count }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
+    ← Back to Corpus
+</a>
+
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends 'main/base.html' %}
+
+{% block content %}
+<h2>Collocations: {{ document.title }}</h2>
+
+<table class="table">
+<tr>
+  <th>Word Pair</th>
+  <th>Count</th>
+</tr>
+
+{% for pair, count in collocations %}
+<tr>
+  <td>{{ pair.0 }} {{ pair.1 }}</td>
+  <td>{{ count }}</td>
+</tr>
+{% endfor %}
+</table>
+
+<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
+    ← Back to Corpus
+</a>
+
+{% endblock %}

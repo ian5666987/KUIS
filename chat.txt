@@ -1,0 +1,328 @@
+Clean Django Project Structure (Production Style)
+
+myproject/
+├── manage.py
+├── requirements.txt
+├── .env
+├── config/
+│   ├── __init__.py
+│   ├── settings/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── development.py
+│   │   └── production.py
+│   ├── urls.py
+│   ├── asgi.py
+│   └── wsgi.py
+│
+├── apps/
+│   ├── users/
+│   │   ├── models.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── admin.py
+│   │   ├── services.py
+│   │   ├── utils.py
+│   │   ├── tests.py
+│   │   └── migrations/
+│   │
+│   ├── blog/
+│   │   ├── models.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── services.py
+│   │   └── ...
+│   │
+│   └── payments/
+│       ├── models.py
+│       ├── views.py
+│       ├── services.py
+│       └── ...
+│
+├── core/
+│   ├── utils/
+│   │   ├── string.py
+│   │   ├── parsing.py
+│   │   └── math.py
+│   ├── constants.py
+│   ├── exceptions.py
+│   └── middleware.py
+│
+├── templates/
+│   ├── base.html
+│   ├── users/
+│   ├── blog/
+│   └── payments/
+│
+├── static/
+│   ├── css/
+│   ├── js/
+│   └── images/
+│
+└── media/
+
+================================================================================
+1. config/ = project configuration
+
+This is the Django project layer:
+
+settings
+URLs
+WSGI/ASGI
+
+👉 Split settings into:
+
+base.py (shared settings)
+development.py (debug, local DB)
+production.py (security, deployment)
+================================================================================
+2. apps/ = feature-based apps
+
+Each app is a business feature, not just code:
+
+users → authentication, profiles
+blog → posts, comments
+payments → billing logic
+
+👉 Each app is self-contained.
+================================================================================
+3. core/ = shared logic
+
+This is where reusable code lives:
+
+string parsing
+calculations
+helpers
+constants
+exceptions
+
+👉 Nothing “web-specific” should go here.
+================================================================================
+4. services.py = business logic layer
+
+Instead of putting logic in views.py, you do:
+
+# services.py
+class BlogService:
+    @staticmethod
+    def create_post(title, content):
+        return Post.objects.create(title=title, content=content)
+
+👉 Views become very simple.
+================================================================================
+5. views.py = thin controllers
+from .services import BlogService
+
+def create_post(request):
+    BlogService.create_post(...)
+
+👉 Views should only:
+
+receive request
+call service
+return response
+================================================================================
+6. templates/ = UI layer
+
+Organized per app:
+
+templates/blog/
+templates/users/
+================================================================================
+7. static/ = frontend assets
+CSS
+JS
+images
+================================================================================
+🧠 Mental model (VERY important)
+
+Think of Django like this:
+
+| Layer     | Responsibility                |
+| --------- | ----------------------------- |
+| views     | request handling (thin layer) |
+| services  | business logic                |
+| models    | database                      |
+| utils     | reusable helpers              |
+| templates | UI                            |
+
+================================================================================
+🚀 Why this structure matters
+
+Compared to beginner Django:
+
+❌ Bad structure
+everything in views.py
+no separation
+hard to scale
+✅ Clean structure
+modular apps
+reusable logic
+easy testing
+production-ready
+================================================================================
+🧩 When you should use this structure
+
+Use this when:
+
+building real apps
+working in teams
+planning to scale
+adding APIs, payments, users, etc.
+================================================================================
+
+
+Super user:
+iank
+ian.kamajaya@gmail.comments
+Ian.Sup3r
+
+
+
+✅ What to send next time (best practice)
+
+Just give me a short package like this:
+
+1. Project state summary
+
+Example:
+
+Django project with:
+public pages (home/about/contact/login/register)
+authentication working
+corpus app with:
+Document model
+upload feature
+KWIC (with pagination + CSV export)
+word frequency
+collocations
+n-grams
+Bootstrap UI enabled
+Login required for corpus features
+2. What you are currently working on
+
+Example:
+
+“I just finished KWIC pagination + CSV export”
+“Next I want KWIC collocation linking”
+3. Paste key files (only when needed)
+
+Usually enough:
+
+views.py (corpus part)
+urls.py
+kwic.html
+models.py
+
+Not the whole project unless something is broken.
+
+🧠 How I’ll handle it
+
+With that info, I can:
+
+reconstruct your architecture in my reasoning
+detect inconsistencies quickly
+continue exactly where we left off
+even improve past design decisions if needed
+⚠️ One important limitation
+
+Without login:
+
+I won’t remember prior sessions
+So continuity depends on what you paste
+
+But in practice, for coding projects like this:
+👉 it works very well if you give a structured summary
+
+💡 Tip for next time
+
+If you want smooth continuity, you can say:
+
+“Continue my Django corpus project from KWIC + CSV export stage”
+
+and optionally add:
+
+screenshots
+errors
+code snippets
+
+That’s usually enough.
+
+👍 Final note
+
+You’re actually at a solid milestone now:
+
+full Django auth system
+working corpus engine
+KWIC + export + pagination
+
+That’s already beyond a basic tutorial project.
+
+Whenever you’re ready to continue, just bring the state back and we’ll build the next layer (collocation linking / semantic analysis / search engine features).
+
+
+✅ To make it even smoother (recommended)
+
+Next time, include these 3 things together:
+
+1. Project summary (from the notes)
+corpus app features (KWIC, pagination, CSV export, etc.)
+authentication status
+models (Document, etc.)
+2. What you want to do next
+
+Example:
+
+“KWIC collocation linking”
+“improve performance for large corpora”
+“add user-specific corpora”
+3. Any code or issue (only if relevant)
+a view/template if something breaks
+or just say “everything works”
+🧠 Why this works
+
+Even without memory:
+
+Django projects are structurally predictable
+your system state is mostly in code, not chat history
+I can rebuild context from a short description
+
+So you don’t need full history—just a clear snapshot
+
+👍 Bottom line
+
+Yes, your plan is sufficient.
+
+And when you return, we can continue seamlessly from:
+
+KWIC + pagination + CSV export stage
+
+See you next time.
+
+
+
+A good way to “resume context” next time is to give me a short checkpoint like this:
+
+✅ Copy/paste reminder (recommended)
+
+Django corpus project: migrated from document-based corpus analysis to database-based KWIC system.
+We have corpus_dashboard.html with per-document actions (frequency, collocations, n-grams, KWIC legacy, KWIC search).
+KWIC URLs: legacy uses <doc_id>, search is global at /corpus/kwic/search/.
+We fixed a NoReverseMatch caused by passing doc.id into kwic_search.
+Next goal: improve/refactor KWIC search UI and backend for database-wide corpus querying.
+
+🧠 Even shorter version (if you want minimal)
+
+Django corpus app: KWIC system split into legacy (doc_id) and global search (kwic_search). Fixed NoReverseMatch. Continuing KWIC UI/backend refactor.
+
+💡 Tip
+
+If you also want faster continuity, you can add:
+
+“PostgreSQL corpus backend”
+“KWIC concordance tool”
+“Django views + templates, no DRF yet”
+
+That helps me immediately align with your architecture.
+
+If you come back later, that’s enough for me to reconstruct where you are and continue without re-explaining everything.

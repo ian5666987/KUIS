@@ -1,0 +1,172 @@
+{% extends 'main/base.html' %}
+
+{% block title %}KWIC{% endblock %}
+
+{% block content %}
+
+<style>
+    .kwic-soft {
+        color: #a2c1fa;
+        font-weight: 300;
+    }
+
+    .kwic-strong {
+        color: #111;
+        font-weight: 700;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        padding: 2px 4px;
+    }
+
+    .kwic-keyword {
+        background-color: #ffc107;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 700;
+    }
+</style>
+
+<h2>KWIC (Key Word in Context)</h2>
+
+<!-- Document selector -->
+<form method="get" class="mb-3">
+    <select class="form-select" onchange="location = this.value;">
+        {% for doc in documents %}
+            <option value="{% url 'kwic_legacy' doc.id %}"
+                {% if doc.id == document.id %}selected{% endif %}>
+                {{ doc.title }}
+            </option>
+        {% endfor %}
+    </select>
+</form>
+
+<!-- Search box -->
+<!-- <form method="get" class="mb-4">
+    <input type="text" name="q" value="{{ query }}" class="form-control"
+           placeholder="Enter keyword...">
+
+    <label class="mt-2">Window size (context words)</label>
+    <input type="number" name="w" value="{{ window }}" class="form-control w-25">
+
+    <button class="btn btn-primary mt-2">Search</button>
+</form> -->
+
+<!-- KWIC filter -->
+<form method="get" class="row g-2 mb-3">
+
+    <div class="col-md-6">
+        <input type="text"
+               name="q"
+               value="{{ query }}"
+               class="form-control"
+               placeholder="Search word or phrase">
+    </div>
+
+    <div class="col-md-2">
+        <input type="number"
+               name="w"
+               value="{{ window }}"
+               class="form-control"
+               min="1">
+    </div>
+
+    <div class="col-md-2">
+        <select name="sort" class="form-select">
+            <option value="center" {% if sort == "center" %}selected{% endif %}>Center</option>
+            <option value="left" {% if sort == "left" %}selected{% endif %}>Left</option>
+            <option value="right" {% if sort == "right" %}selected{% endif %}>Right</option>
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <button class="btn btn-primary w-100">Search</button>
+    </div>
+
+</form>
+
+<a class="btn btn-success mb-3"
+   href="{% url 'kwic_export_csv' document.id %}?q={{ query }}&w={{ window }}">
+   Export CSV
+</a>
+
+<!-- Results -->
+{% if query %}
+<table class="table table-bordered table-sm">
+
+    <thead>
+        <tr>
+            <th>Left Context</th>
+            <th>Keyword</th>
+            <th>Right Context</th>
+        </tr>
+    </thead>
+
+    <tbody>
+    {% for item in results %}
+        <tr>
+
+            <!-- LEFT -->
+            <td
+             class="font-monospace
+                {% if sort == 'left' %}kwic-strong{% else %}kwic-soft{% endif %}">
+                {{ item.left|join:" " }}
+            </td>
+
+            <!-- KEYWORD -->
+            <td class="text-center font-monospace">
+                {% for w in item.keyword %}
+                    <span class="kwic-keyword">{{ w }}</span>
+                {% endfor %}
+            </td>
+
+            <!-- RIGHT -->
+            <td class="font-monospace
+                {% if sort == 'right' %}kwic-strong{% else %}kwic-soft{% endif %}">
+                {{ item.right|join:" " }}
+            </td>
+
+        </tr>
+    {% empty %}
+        <tr>
+            <td colspan="3">No matches found</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+
+</table>
+
+{% if page_obj.has_other_pages %}
+<nav class="mt-4">
+  <ul class="pagination">
+
+    {% if page_obj.has_previous %}
+      <li class="page-item">
+        <a class="page-link"
+           href="?q={{ query }}&w={{ window }}&sort={{ sort }}&page={{ page_obj.previous_page_number }}">
+          Previous
+        </a>
+      </li>
+    {% endif %}
+
+    <li class="page-item disabled">
+      <span class="page-link">
+        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+      </span>
+    </li>
+
+    {% if page_obj.has_next %}
+      <li class="page-item">
+        <a class="page-link"
+           href="?q={{ query }}&w={{ window }}&sort={{ sort }}&page={{ page_obj.next_page_number }}">
+          Next
+        </a>
+      </li>
+    {% endif %}
+
+  </ul>
+</nav>
+{% endif %}
+
+{% endif %}
+
+{% endblock %}

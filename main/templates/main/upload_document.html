@@ -1,0 +1,36 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Upload Document{% endblock %}
+
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-md-6">
+
+    <h2 class="mb-4">Upload Document</h2>
+
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label class="form-label">Title</label>
+        {{ form.title }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Paste Text</label>
+        {{ form.content }}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Or Upload File (.txt)</label>
+        {{ form.file }}
+      </div>
+
+      <button class="btn btn-primary w-100">Upload</button>
+    </form>
+
+  </div>
+</div>
+
+{% endblock %}
