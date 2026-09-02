@@ -78,14 +78,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'corpus_db',
         'USER': 'corpus_user',
-        'PASSWORD': 'C0rpusUser',
+        'PASSWORD': 'changethistoyourownpassword',
         'HOST': 'localhost',
         'PORT': 5432,
     }
-    # 'default': {
-    #     'ENGINE': 'django.db.backends.sqlite3',
-    #     'NAME': BASE_DIR / 'db.sqlite3',
-    # }
 }
 
 

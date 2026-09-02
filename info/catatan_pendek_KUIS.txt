@@ -1,0 +1,9 @@
+Environment setup:
+1. VS Code
+2. PostgreSQL Database
+3. Python 3.14.7
+
+Main features:
+1. User login
+2. File upload, corpus main functionalities, data search
+3. Optimization

@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<document>
+  <header>
+    <textfile>KUIS/KUIS2023FUA201.txt</textfile>
+    <lang>english</lang>
+  </header>
+    <body>
+<segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' state='active' comment='kesalahan urutan kata dalam kalimat' correction='Tuti sayang'>Sayang <segment id='1' features='eror;ejaan;ejk' state='active' parent='3'>tuti</segment></segment>,
+
+<segment id='2' features='eror;gramatikal;kalimat;kalsub' state='active'><segment id='9' features='eror;ejaan;ejtb' state='active' parent='2'>Baik baik</segment> saja</segment>.
+Aku juga ingin bertemu dengan <segment id='4' features='eror;ejaan;ejk' state='active'>tuti</segment>.
+Masalah itu serius.
+Aku <segment id='10' features='eror;ejaan;ejsp' state='active'>mencintaimu.<segment id='6' features='eror;ejaan;ejtb' state='active'>Jadi</segment> mari</segment> kita menikah.
+<segment id='7' features='eror;ejaan;ejtb' state='active'>Maka  kemudian</segment> masalah akan <segment id='5' features='eror;ejaan;ejhrf' state='active'>tepecahkan</segment>.
+Mari kita bicara langsung.
+
+<segment id='8' features='eror;ejaan;ejk' state='active'>salam</segment> sayang,
+Rano    </body>
+</document>
