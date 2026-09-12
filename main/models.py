@@ -4,7 +4,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-import re
+
+from .corpus_parsing import extract_word_streams
 
 # Create your models here.
 class Document(models.Model):
@@ -15,6 +16,7 @@ class Document(models.Model):
 
     # Preprocessed
     token_count = models.IntegerField(default=0)
+    token_count_corrected = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -26,22 +28,45 @@ class Document(models.Model):
         return self.title
     
 class Token(models.Model):
+    ORIGINAL = 'original'
+    CORRECTED = 'corrected'
+    MODE_CHOICES = [
+        (ORIGINAL, 'Original'),
+        (CORRECTED, 'Corrected'),
+    ]
+
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='tokens')
     word = models.CharField(max_length=100)
     position = models.IntegerField()
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=ORIGINAL)
 
     class Meta:
         indexes = [
             models.Index(fields=['word']),
-            models.Index(fields=['document', 'position']),
+            models.Index(fields=['document', 'mode', 'position']),
         ]
 
     def __str__(self):
-        return f"{self.word} ({self.document_id}:{self.position})"
-    
-def tokenize_text(text):
-    # simple clean tokenizer (we will improve later if needed)
-    return re.findall(r"\b\w+\b", text.lower())
+        return f"{self.word} ({self.document_id}:{self.mode}:{self.position})"
+
+
+def build_tokens(document):
+    """(Re)computes the Token rows for a document from its content, for both the
+    original and corrected word streams. Does not save the document itself."""
+    original_words, corrected_words = extract_word_streams(document.content)
+
+    tokens = [
+        Token(document=document, word=word, position=i, mode=Token.ORIGINAL)
+        for i, word in enumerate(original_words)
+    ] + [
+        Token(document=document, word=word, position=i, mode=Token.CORRECTED)
+        for i, word in enumerate(corrected_words)
+    ]
+
+    Token.objects.bulk_create(tokens)
+
+    return len(original_words), len(corrected_words)
+
 
 #Signals (kind of callback), must be placed at the bottom of (Model) files
 @receiver(post_save, sender=Document)
@@ -49,19 +74,8 @@ def create_tokens(sender, instance, created, **kwargs):
     if not created:
         return
 
-    words = tokenize_text(instance.content)
+    token_count, token_count_corrected = build_tokens(instance)
 
-    tokens = [
-        Token(
-            document=instance,
-            word=word,
-            position=i
-        )
-        for i, word in enumerate(words)
-    ]
-
-    Token.objects.bulk_create(tokens)
-
-    # update token count
-    instance.token_count = len(words)
-    instance.save(update_fields=['token_count'])
+    instance.token_count = token_count
+    instance.token_count_corrected = token_count_corrected
+    instance.save(update_fields=['token_count', 'token_count_corrected'])

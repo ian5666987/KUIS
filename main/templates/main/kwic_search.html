@@ -12,6 +12,12 @@
            placeholder="Enter word (e.g. language, corpus, data)"
            value="{{ word }}">
 
+    <div class="form-check mt-2">
+        <input type="checkbox" class="form-check-input" id="corrected" name="corrected" value="1"
+               {% if corrected %}checked{% endif %}>
+        <label class="form-check-label" for="corrected">Show corrected text</label>
+    </div>
+
     <button class="btn btn-primary mt-2">
         Search
     </button>

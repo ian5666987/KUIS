@@ -15,7 +15,7 @@ from django.contrib.auth.views import LoginView
 
 #For corpus functionalities
 from .models import Token, Document
-import re
+from .corpus_parsing import extract_word_streams
 from collections import Counter
 
 #For document uploading
@@ -122,25 +122,37 @@ def corpus_dashboard(request):
         'documents': documents
     })
 
+def _is_corrected_mode(request):
+    return request.GET.get('corrected') == '1'
+
+
+def _get_words(doc, corrected):
+    original_words, corrected_words = extract_word_streams(doc.content)
+    return corrected_words if corrected else original_words
+
+
 @login_required
 def word_frequency(request, doc_id):
     doc = Document.objects.get(id=doc_id)
+    corrected = _is_corrected_mode(request)
 
-    words = re.findall(r'\w+', doc.content.lower())
+    words = _get_words(doc, corrected)
     freq = Counter(words)
 
     most_common = freq.most_common(20)
 
     return render(request, 'main/word_frequency.html', {
         'document': doc,
-        'frequencies': most_common
+        'frequencies': most_common,
+        'corrected': corrected
     })
 
 @login_required
 def collocations(request, doc_id):
     doc = Document.objects.get(id=doc_id)
+    corrected = _is_corrected_mode(request)
 
-    words = re.findall(r'\w+', doc.content.lower())
+    words = _get_words(doc, corrected)
 
     pairs = zip(words, words[1:])
     freq = Counter(pairs)
@@ -149,14 +161,16 @@ def collocations(request, doc_id):
 
     return render(request, 'main/collocations.html', {
         'document': doc,
-        'collocations': most_common
+        'collocations': most_common,
+        'corrected': corrected
     })
 
 @login_required
 def ngrams(request, doc_id, n=3):
     doc = Document.objects.get(id=doc_id)
+    corrected = _is_corrected_mode(request)
 
-    words = re.findall(r'\w+', doc.content.lower())
+    words = _get_words(doc, corrected)
 
     ngrams_list = zip(*[words[i:] for i in range(n)])
     freq = Counter(ngrams_list)
@@ -166,7 +180,8 @@ def ngrams(request, doc_id, n=3):
     return render(request, 'main/ngrams.html', {
         'document': doc,
         'ngrams': most_common,
-        'n': n
+        'n': n,
+        'corrected': corrected
     })
 
 @login_required
@@ -208,11 +223,12 @@ def kwic_legacy(request, doc_id):
     query = request.GET.get("q", "").strip().lower()
     window = int(request.GET.get("w", 5))
     sort = request.GET.get("sort", "center")
+    corrected = _is_corrected_mode(request)
 
     results = []
 
     if query:
-        words = re.findall(r"\b\w+\b", doc.content.lower())
+        words = _get_words(doc, corrected)
         query_tokens = query.split()
         n = len(query_tokens)
 
@@ -246,6 +262,7 @@ def kwic_legacy(request, doc_id):
         "query": query,
         "window": window,
         "sort": sort,
+        "corrected": corrected,
         "page_obj": page_obj   # important for template
     })
 
@@ -307,23 +324,27 @@ def kwic_token(request, doc_id=None):
 def kwic_search(request):
     word = request.GET.get('word', '').lower().strip()
     window = 5
+    corrected = _is_corrected_mode(request)
+    mode = Token.CORRECTED if corrected else Token.ORIGINAL
 
     results = []
 
     if word:
-        matches = Token.objects.filter(word=word)
+        matches = Token.objects.filter(word=word, mode=mode)
 
         for match in matches:
             doc = match.document
 
             left = Token.objects.filter(
                 document=doc,
+                mode=mode,
                 position__gte=match.position - window,
                 position__lt=match.position
             )
 
             right = Token.objects.filter(
                 document=doc,
+                mode=mode,
                 position__gt=match.position,
                 position__lte=match.position + window
             )
@@ -337,8 +358,9 @@ def kwic_search(request):
 
     return render(request, "main/kwic_search.html", {
         "word": word,
-        "results": results
-    })    
+        "results": results,
+        "corrected": corrected
+    })
 
 @login_required
 def kwic_export_csv(request, doc_id):
@@ -346,11 +368,12 @@ def kwic_export_csv(request, doc_id):
 
     query = request.GET.get("q", "").strip().lower()
     window = int(request.GET.get("w", 5))
+    corrected = _is_corrected_mode(request)
 
     results = []
 
     if query:
-        words = re.findall(r"\b\w+\b", doc.content.lower())
+        words = _get_words(doc, corrected)
         query_tokens = query.split()
         n = len(query_tokens)
 

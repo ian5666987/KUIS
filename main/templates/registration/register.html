@@ -9,24 +9,42 @@
     <form method="post">
       {% csrf_token %}
 
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger">
+          {{ form.non_field_errors }}
+        </div>
+      {% endif %}
+
       <div class="mb-3">
         <label class="form-label">Username</label>
         {{ form.username }}
+        {% for error in form.username.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
 
       <div class="mb-3">
         <label class="form-label">Email</label>
         {{ form.email }}
+        {% for error in form.email.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
 
       <div class="mb-3">
         <label class="form-label">Password</label>
         {{ form.password1 }}
+        {% for error in form.password1.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
 
       <div class="mb-3">
         <label class="form-label">Confirm Password</label>
         {{ form.password2 }}
+        {% for error in form.password2.errors %}
+          <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
       </div>
 
       <button class="btn btn-success w-100">Sign Up</button>
