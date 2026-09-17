@@ -77,6 +77,40 @@
     }
   }
 
+  /* --- Theme -------------------------------------------------------------
+     Light unless the reader picks dark; the choice is remembered per browser.
+     The <head> script has already applied it — this only wires the control. */
+  var themeSwitch = document.querySelector('[data-theme-switch]');
+  if (themeSwitch) {
+    var themeButtons = Array.prototype.slice.call(
+      themeSwitch.querySelectorAll('button[data-theme]')
+    );
+
+    var applyTheme = function (theme, remember) {
+      document.documentElement.setAttribute('data-theme', theme);
+
+      themeButtons.forEach(function (button) {
+        button.setAttribute(
+          'aria-pressed',
+          button.getAttribute('data-theme') === theme ? 'true' : 'false'
+        );
+      });
+
+      if (remember) {
+        try { localStorage.setItem('kuis-theme', theme); } catch (e) { /* ignore */ }
+      }
+    };
+
+    applyTheme(document.documentElement.getAttribute('data-theme') || 'light', false);
+    themeSwitch.hidden = false;
+
+    themeButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        applyTheme(button.getAttribute('data-theme'), true);
+      });
+    });
+  }
+
   /* --- Sticky offsets ----------------------------------------------------
      Column headers stick below the context bar rather than behind it. */
   function measureContext() {

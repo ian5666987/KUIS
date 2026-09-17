@@ -82,6 +82,17 @@ class PagesRenderTests(ExplorerTestCase):
                 self.assertEqual(self.client.get(reverse(name)).status_code, 200)
 
 
+class ThemeTests(ExplorerTestCase):
+    def test_theme_switch_renders_and_defaults_to_light(self):
+        html = self.client.get(reverse('dashboard')).content.decode()
+
+        # No data-theme attribute on <html> means the light :root tokens stand;
+        # dark is only ever applied by the reader's stored choice.
+        self.assertIn('data-theme-switch', html)
+        self.assertIn('<button type="button" data-theme="light" aria-pressed="true">', html)
+        self.assertNotIn('<html lang="en" data-theme', html)
+
+
 class SelectionTests(ExplorerTestCase):
     def test_selection_survives_navigation_without_url_params(self):
         self.select(self.corpus)

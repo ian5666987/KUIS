@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Corpus Explorer{% endblock %} · KUIS</title>
     <link rel="stylesheet" href="{% static 'main/kuis.css' %}">
+
+    {% comment %}
+      Applies a stored theme before the first paint, so a dark-theme reader
+      never gets a flash of the light page. Light is the default: with nothing
+      stored, no attribute is set and the :root tokens stand.
+    {% endcomment %}
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('kuis-theme');
+          if (stored === 'dark' || stored === 'light') {
+            document.documentElement.setAttribute('data-theme', stored);
+          }
+        } catch (e) { /* private mode or blocked storage: stay on light */ }
+      })();
+    </script>
 </head>
 <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -32,6 +48,11 @@
         </nav>
 
         <div class="masthead__user">
+          <div class="theme-switch" role="group" aria-label="Theme" data-theme-switch hidden>
+            <button type="button" data-theme="light" aria-pressed="true">Light</button>
+            <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+          </div>
+
           {% if user.is_authenticated %}
             {% if user.is_staff %}
               <a href="/admin/" class="text-sm">Django admin</a>

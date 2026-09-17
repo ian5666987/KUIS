@@ -40,40 +40,44 @@
 
   --radius: 3px;
   --gap: 16px;
+
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper:        #15171b;
-    --surface:      #1c1f24;
-    --sunken:       #232730;
-    --ink:          #e8eaed;
-    --ink-muted:    #a7aeb7;
-    --ink-faint:    #8b929b;
-    --rule:         #333841;
-    --rule-strong:  #4d545f;
-    --accent:       #8ebdf0;
-    --accent-hover: #b0d2f7;
-    --accent-soft:  #1e2b3a;
-    --on-accent:    #0f1720;
-    --warn-ink:     #f0cf90;
-    --warn-bg:      #2c2415;
-    --warn-rule:    #6b5626;
-    --err-ink:      #f2aaaa;
-    --err-bg:       #2e1c1c;
-    --err-rule:     #6d3636;
-    --ok-ink:       #9ed9b6;
-    --ok-bg:        #172a20;
-    --ok-rule:      #35603f;
-    --mark:         #55471a;
-    --mark-rule:    #8a7326;
-    --focus:        #7fb6f5;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper:        #15171b;
+  --surface:      #1c1f24;
+  --sunken:       #232730;
+  --ink:          #e8eaed;
+  --ink-muted:    #a7aeb7;
+  --ink-faint:    #8b929b;
+  --rule:         #333841;
+  --rule-strong:  #4d545f;
+  --accent:       #8ebdf0;
+  --accent-hover: #b0d2f7;
+  --accent-soft:  #1e2b3a;
+  --on-accent:    #0f1720;
+  --warn-ink:     #f0cf90;
+  --warn-bg:      #2c2415;
+  --warn-rule:    #6b5626;
+  --err-ink:      #f2aaaa;
+  --err-bg:       #2e1c1c;
+  --err-rule:     #6d3636;
+  --ok-ink:       #9ed9b6;
+  --ok-bg:        #172a20;
+  --ok-rule:      #35603f;
+  --mark:         #55471a;
+  --mark-rule:    #8a7326;
+  --focus:        #7fb6f5;
 }
 
 /* --- Base ---------------------------------------------------------------- */
 
 *, *::before, *::after { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
 
 html { -webkit-text-size-adjust: 100%; }
 
@@ -303,6 +307,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 /* A checkmark, so the active mode never depends on colour alone. */
 .seg input:checked + label::before { content: "\2713"; font-size: 12px; }
 .seg input:focus-visible + label { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* Theme switch. Both options are always visible and the active one carries a
+   checkmark, so the current theme never depends on colour alone. Hidden until
+   the script unhides it — with no JavaScript there is nothing it could do. */
+.theme-switch {
+  display: inline-flex;
+  border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  overflow: hidden;
+}
+.theme-switch button {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12.5px; line-height: 1.4;
+  padding: 4px 9px;
+  color: var(--ink-muted); background: var(--surface);
+  border: 0; border-right: 1px solid var(--rule-strong);
+  cursor: pointer;
+}
+.theme-switch button:last-child { border-right: 0; }
+.theme-switch button:hover { background: var(--sunken); color: var(--ink); }
+.theme-switch button[aria-pressed="true"] {
+  background: var(--accent); color: var(--on-accent); font-weight: 600;
+}
+.theme-switch button[aria-pressed="true"]::before { content: "\2713"; font-size: 11px; }
 
 /* --- Buttons ------------------------------------------------------------- */
 

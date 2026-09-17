@@ -203,6 +203,8 @@ Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dash
 
 **UI conventions worth keeping.** Numbers are right-aligned and tabular; sort direction and text mode are carried by a glyph and `aria-sort`/`aria-current`, never by colour alone; loading, empty and error are three distinct states (`components/state.html`, the `.notice` variants, and `body.is-loading`), because "still working" and "nothing found" must never look the same.
 
+**Theming.** Light and dark are an explicit reader choice, **not** `prefers-color-scheme` — the default is light, so the app looks the same on any machine until someone chooses otherwise. The light palette is the `:root` token block; dark redefines the same token names under `:root[data-theme="dark"]`, which means no component rule ever hardcodes a colour. The choice is stored in `localStorage` under `kuis-theme` and re-applied by a small inline script in `base.html`'s `<head>` **before** first paint, so a dark-theme reader never sees a flash of the light page; `kuis.js` only wires the switch and unhides it (with no JavaScript there is nothing it could do, and light is already correct).
+
 ---
 
 ## 8. Migration / Handover Guide
