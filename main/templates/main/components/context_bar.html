@@ -11,7 +11,10 @@
 
 {% load humanize kuis %}
 
-<form method="get" class="context" data-context data-open="true">
+{% comment %} data-open stays true so the panel is visible without JS; data-start-open
+   tells the enhancement to collapse it once a selection exists. {% endcomment %}
+<form method="get" class="context" data-context data-open="true"
+      data-start-open="{% if selected_corpus_count %}false{% else %}true{% endif %}">
   {% comment %} Marker so the view can tell "submitted with nothing ticked" apart from
      "not submitted at all" — otherwise a selection could never be cleared. {% endcomment %}
   <input type="hidden" name="corpus_selection" value="1">
@@ -66,11 +69,11 @@
   </div>
 
   <div class="context__panel" id="corpus-panel">
-    <p class="text-sm text-muted" style="margin-bottom:10px; max-width:70ch;">
+    <!-- <p class="text-sm text-muted" style="margin-bottom:10px; max-width:70ch;">
       <strong>Original</strong> counts the learner text as written.
       <strong>Corrected</strong> substitutes the correction recorded on each annotated
       segment. Files without segment annotations read the same in both modes.
-    </p>
+    </p> -->
 
     {% include 'main/components/corpus_picker.html' %}
   </div>

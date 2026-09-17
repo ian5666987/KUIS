@@ -18,10 +18,10 @@
         {% endif %}
       </div>
     </div>
-    <p>
+    <!-- <p>
       A corpus is a named group of files. Files may belong to several corpora; an
       analysis over overlapping corpora still counts each file once.
-    </p>
+    </p> -->
   </div>
 
   <form method="get" class="toolbar" role="search">
@@ -93,10 +93,13 @@
 
   {% if user.is_staff and unassigned_count %}
     <details class="aside">
-      <summary>
+      <!-- <summary>
         {{ unassigned_count }} uploaded file{{ unassigned_count|pluralize }}
         belong{{ unassigned_count|pluralize:"s," }} to no corpus, so
         {{ unassigned_count|pluralize:"it is,they are" }} excluded from every analysis
+      </summary> -->
+      <summary>
+        No corpus: {{ unassigned_count }} file{{ unassigned_count|pluralize }}
       </summary>
       <div class="aside__body">
         <ul class="aside__list">
@@ -110,7 +113,6 @@
           Add {{ unassigned_count|pluralize:"it,them" }} to a corpus
         </button>
         <a href="{% url 'corpus_create' %}" data-assign-fallback>Add {{ unassigned_count|pluralize:"it,them" }} to a corpus</a>
-        to make {{ unassigned_count|pluralize:"it,them" }} analysable.
       </div>
     </details>
   {% endif %}

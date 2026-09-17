@@ -48,10 +48,15 @@
     var panel = context.querySelector('.context__panel');
 
     if (toggle && panel) {
-      // Collapsed by default once JS is available; the summary still shows
-      // exactly what the analysis is running over.
-      var startOpen = context.getAttribute('data-open') === 'true';
-      setOpen(startOpen);
+      // Collapsed once a selection exists; the summary still shows exactly what
+      // the analysis is running over. Opens itself when nothing is selected yet.
+      setOpen(context.getAttribute('data-start-open') !== 'false', false);
+
+      // Applying a selection reloads the page, so the panel has done its job:
+      // close it straight away rather than leaving it over the incoming results.
+      context.addEventListener('submit', function () {
+        setOpen(false);
+      });
 
       toggle.addEventListener('click', function () {
         setOpen(context.getAttribute('data-open') !== 'true');
@@ -65,12 +70,12 @@
       });
     }
 
-    function setOpen(open) {
+    function setOpen(open, focusSearch) {
       context.setAttribute('data-open', open ? 'true' : 'false');
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggle.textContent = open ? 'Close' : 'Change selection';
       measureContext();
-      if (open) {
+      if (open && focusSearch !== false) {
         var search = panel.querySelector('[data-picker-search]');
         if (search) search.focus();
       }

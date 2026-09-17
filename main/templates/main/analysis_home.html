@@ -8,10 +8,10 @@
 
   <div class="page-head">
     <h1>Analysis</h1>
-    <p>
+    <!-- <p>
       Choose the corpora once; every feature below reads the same selection and
       text mode until you change them.
-    </p>
+    </p> -->
   </div>
 
   {% include 'main/components/context_bar.html' %}
@@ -49,31 +49,31 @@
         <li>
           <a href="{% url 'word_frequency' %}" data-loading>
             <span class="feature-list__name">Word frequency</span>
-            <span class="feature-list__desc">How often each word form occurs, with a per-million rate so corpora of different sizes stay comparable.</span>
+            <!-- <span class="feature-list__desc">How often each word form occurs, with a per-million rate so corpora of different sizes stay comparable.</span> -->
           </a>
         </li>
         <li>
           <a href="{% url 'collocations' %}" data-loading>
             <span class="feature-list__name">Collocations</span>
-            <span class="feature-list__desc">Counts for every adjacent word pair. Pairs never run across a file boundary.</span>
+            <!-- <span class="feature-list__desc">Counts for every adjacent word pair. Pairs never run across a file boundary.</span> -->
           </a>
         </li>
         <li>
           <a href="{% url 'ngrams' %}" data-loading>
             <span class="feature-list__name">N-grams</span>
-            <span class="feature-list__desc">Recurring sequences of 2 to 5 words — the standard way to surface fixed expressions.</span>
+            <!-- <span class="feature-list__desc">Recurring sequences of 2 to 5 words — the standard way to surface fixed expressions.</span> -->
           </a>
         </li>
         <li>
           <a href="{% url 'kwic' %}" data-loading>
             <span class="feature-list__name">Concordance (KWIC)</span>
-            <span class="feature-list__desc">Every occurrence of a word or phrase in context, sortable by the words to either side.</span>
+            <!-- <span class="feature-list__desc">Every occurrence of a word or phrase in context, sortable by the words to either side.</span> -->
           </a>
         </li>
         <li>
           <a href="{% url 'kwic_search' %}" data-loading>
             <span class="feature-list__name">Word index</span>
-            <span class="feature-list__desc">The same concordance view for a single word form, answered from the pre-built index — fastest on large selections.</span>
+            <!-- <span class="feature-list__desc">The same concordance view for a single word form, answered from the pre-built index — fastest on large selections.</span> -->
           </a>
         </li>
       </ul>
