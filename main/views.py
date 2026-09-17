@@ -165,10 +165,26 @@ def collocations(request, doc_id):
         'corrected': corrected
     })
 
+NGRAM_SIZES = [2, 3, 4, 5]
+
+
+def _get_ngram_size(request):
+    try:
+        n = int(request.GET.get('n', 3))
+    except ValueError:
+        n = 3
+
+    if n not in NGRAM_SIZES:
+        n = 3
+
+    return n
+
+
 @login_required
-def ngrams(request, doc_id, n=3):
+def ngrams(request, doc_id):
     doc = Document.objects.get(id=doc_id)
     corrected = _is_corrected_mode(request)
+    n = _get_ngram_size(request)
 
     words = _get_words(doc, corrected)
 
@@ -181,6 +197,7 @@ def ngrams(request, doc_id, n=3):
         'document': doc,
         'ngrams': most_common,
         'n': n,
+        'ngram_sizes': NGRAM_SIZES,
         'corrected': corrected
     })
 
