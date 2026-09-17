@@ -430,7 +430,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 
 /* --- Tables -------------------------------------------------------------- */
 
-.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
+.table-wrap {
+  /* Deliberately NOT overflow-x: auto. An overflow container scrolls in both
+     axes, which makes it the scrollport a sticky thead resolves against — the
+     header would then be pushed var(--context-h) down from the top of the
+     table (landing on row 2) instead of parking under the context bar. `clip`
+     keeps the rounded corners without creating a scrollport. Horizontal
+     scrolling comes back below 720px, where the context bar is static. */
+  overflow: clip;
+  border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface);
+}
 
 table.data {
   width: 100%; border-collapse: collapse; font-size: 14px;
@@ -642,6 +651,12 @@ body.is-loading .working { display: inline-flex; }
 
 @media (max-width: 720px) {
   .context { position: static; }
+
+  /* Narrow screens need the sideways scroll more than a pinned header, and the
+     context bar no longer sticks, so there is nothing to park beneath. */
+  .table-wrap { overflow: auto; }
+  table.data thead th { position: static; }
+
   .context__sep { display: none; }
   .stats__item { flex: 1 1 45%; }
   .toolbar__actions { margin-left: 0; width: 100%; }

@@ -8,10 +8,10 @@
 
   <div class="page-head">
     <h1>Concordance (KWIC)</h1>
-    <p>
+    <!-- <p>
       Every occurrence of a word or phrase in its context. Phrases are matched as a
       run of whole words, and each line names the file it came from.
-    </p>
+    </p> -->
   </div>
 
   {% include 'main/components/context_bar.html' %}
@@ -107,7 +107,7 @@
       {% endif %}
 
     {% else %}
-      {% include 'main/components/state.html' with title='Enter a search term' body='Type a word or a phrase above to see every occurrence in context across the selected corpora.' %}
+      {% include 'main/components/state.html' with title='Enter a search term'  %}
     {% endif %}
 
   </div>

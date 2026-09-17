@@ -120,13 +120,28 @@
      Column headers stick below the context bar rather than behind it. */
   function measureContext() {
     var bar = document.querySelector('.context');
-    var height = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
+    // Only a *sticky* bar covers the top of the viewport. Below the breakpoint
+    // it scrolls away with the page, so nothing should be offset for it.
+    var sticky = bar && getComputedStyle(bar).position === 'sticky';
+    var height = sticky ? Math.round(bar.getBoundingClientRect().height) : 0;
     document.documentElement.style.setProperty('--context-h', height + 'px');
   }
 
-  if (document.querySelector('.context')) {
+  var contextBar = document.querySelector('.context');
+  if (contextBar) {
     measureContext();
     window.addEventListener('resize', measureContext);
+
+    // The bar's height also moves on its own: a webfont swaps in, the summary
+    // rewraps, the "Working…" cue appears. A stale value leaves the column
+    // header floating clear of the bar, so track the real box.
+    if (window.ResizeObserver) {
+      new ResizeObserver(measureContext).observe(contextBar);
+    } else {
+      window.addEventListener('load', measureContext);
+    }
+
+    window.addEventListener('pageshow', measureContext);
   }
 
   /* --- Pickers: search, bulk select, live count --------------------------
