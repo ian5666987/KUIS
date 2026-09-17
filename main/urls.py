@@ -16,20 +16,27 @@ urlpatterns = [
     # Registration
     path('register/', views.register, name='register'),
 
-    # Corpus 
+    # Corpus management (creating/editing is admin-only)
     path('corpus/', views.corpus_dashboard, name='corpus_dashboard'),
+    path('corpus/create/', views.corpus_create, name='corpus_create'),
+    path('corpus/<int:corpus_id>/', views.corpus_detail, name='corpus_detail'),
+    path('corpus/<int:corpus_id>/edit/', views.corpus_edit, name='corpus_edit'),
+    path('corpus/<int:corpus_id>/delete/', views.corpus_delete, name='corpus_delete'),
     # Upload documents
     path('corpus/upload/', views.upload_document, name='upload_document'),
+
+    # Analysis - runs over the corpora selected in the session, no doc_id
+    path('analysis/', views.analysis_home, name='analysis_home'),
     # Word count
-    path('corpus/frequency/<int:doc_id>/', views.word_frequency, name='word_frequency'),  
+    path('analysis/frequency/', views.word_frequency, name='word_frequency'),
     # Collocations
-    path('corpus/collocations/<int:doc_id>/', views.collocations, name='collocations'),
+    path('analysis/collocations/', views.collocations, name='collocations'),
     # N-grams
-    path('corpus/ngrams/<int:doc_id>/', views.ngrams, name='ngrams'),
+    path('analysis/ngrams/', views.ngrams, name='ngrams'),
     # KWIC
-    path('corpus/kwic-legacy/<int:doc_id>/', views.kwic_legacy, name='kwic_legacy'),
+    path('analysis/kwic/', views.kwic, name='kwic'),
     # Export to CSV
-    path('corpus/kwic/<int:doc_id>/export/', views.kwic_export_csv, name='kwic_export_csv'),    
+    path('analysis/kwic/export/', views.kwic_export_csv, name='kwic_export_csv'),
     # KWIC Search
-    path('corpus/kwic/search/', views.kwic_search, name='kwic_search'),
+    path('analysis/kwic/search/', views.kwic_search, name='kwic_search'),
 ]

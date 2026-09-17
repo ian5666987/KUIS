@@ -1,0 +1,57 @@
+{% extends 'main/base.html' %}
+
+{% block title %}{{ corpus.name }}{% endblock %}
+
+{% block content %}
+
+<h2>{{ corpus.name }}</h2>
+
+<p class="text-muted">
+  {{ documents|length }} file(s) · created {{ corpus.created_at|date:"Y-m-d" }}
+  {% if corpus.created_by %} by {{ corpus.created_by.username }}{% endif %}
+</p>
+
+{% if corpus.description %}
+  <p>{{ corpus.description }}</p>
+{% endif %}
+
+{% if user.is_staff %}
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <a href="{% url 'corpus_edit' corpus.id %}" class="btn btn-secondary btn-sm">Edit</a>
+    <a href="{% url 'corpus_delete' corpus.id %}" class="btn btn-outline-danger btn-sm">Delete</a>
+  </div>
+{% endif %}
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Uploaded</th>
+      <th>Tokens</th>
+      <th>Also in</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for doc in documents %}
+      <tr>
+        <td>{{ doc.title }}</td>
+        <td>{{ doc.uploaded_at|date:"Y-m-d" }}</td>
+        <td>{{ doc.token_count }}</td>
+        <td class="text-muted small">
+          {% for other in doc.corpora.all %}
+            {% if other.id != corpus.id %}{{ other.name }}{% if not forloop.last %}, {% endif %}{% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4">This corpus has no files.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
+    ← Back to Corpora
+</a>
+
+{% endblock %}

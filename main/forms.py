@@ -32,7 +32,37 @@ class ContactForm(forms.Form):
         widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 4})
     )
 
-from .models import Document
+from .models import Corpus, Document
+
+class CorpusForm(forms.ModelForm):
+    documents = forms.ModelMultipleChoiceField(
+        queryset=Document.objects.all(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple
+    )
+
+    class Meta:
+        model = Corpus
+        fields = ['name', 'description', 'documents']
+
+        widgets = {
+            'name': forms.TextInput(attrs={'class': 'form-control'}),
+            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        documents = cleaned_data.get('documents')
+        # New files arrive as request.FILES.getlist('files'), handled in the view,
+        # because Django's FileField only ever cleans a single file.
+        uploaded_files = self.files.getlist('files') if self.files else []
+
+        if not documents and not uploaded_files:
+            raise forms.ValidationError(
+                "Select at least one existing file or upload a new one."
+            )
+
+        return cleaned_data
 
 class DocumentForm(forms.ModelForm):
     file = forms.FileField(required=False)

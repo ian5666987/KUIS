@@ -1,0 +1,73 @@
+{% extends 'main/base.html' %}
+
+{% block title %}{% if corpus %}Edit Corpus{% else %}Create Corpus{% endif %}{% endblock %}
+
+{% block content %}
+
+<h2 class="mb-4">
+  {% if corpus %}Edit Corpus: {{ corpus.name }}{% else %}Create New Corpus{% endif %}
+</h2>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+
+  {% if form.non_field_errors %}
+    <div class="alert alert-danger">
+      {{ form.non_field_errors }}
+    </div>
+  {% endif %}
+
+  <div class="mb-3">
+    <label for="{{ form.name.id_for_label }}" class="form-label">Corpus name</label>
+    {{ form.name }}
+    {% if form.name.errors %}<div class="text-danger small">{{ form.name.errors }}</div>{% endif %}
+  </div>
+
+  <div class="mb-3">
+    <label for="{{ form.description.id_for_label }}" class="form-label">
+      Description <span class="text-muted">(optional)</span>
+    </label>
+    {{ form.description }}
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Include existing files</label>
+
+    <div class="border rounded p-3" style="max-height: 320px; overflow-y: auto;">
+      {% for checkbox in form.documents %}
+        <div class="form-check">
+          {{ checkbox.tag }}
+          <label class="form-check-label" for="{{ checkbox.id_for_label }}">
+            {{ checkbox.choice_label }}
+          </label>
+        </div>
+      {% empty %}
+        <p class="text-muted mb-0">No files uploaded yet — add some below.</p>
+      {% endfor %}
+    </div>
+
+    <div class="form-text">
+      A file may belong to several corpora. When corpora overlap, shared files are
+      still only counted once in any analysis.
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="files" class="form-label">Or upload new XML files</label>
+    {# Plain input rather than a Django FileField: Django only cleans one file per
+       FileField, so the view reads request.FILES.getlist('files') directly. #}
+    <input type="file" name="files" id="files" class="form-control" multiple>
+    <div class="form-text">UTF-8 encoded. Each file becomes a document named after the file.</div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">
+    {% if corpus %}Save Changes{% else %}Create Corpus{% endif %}
+  </button>
+
+  <a href="{% if corpus %}{% url 'corpus_detail' corpus.id %}{% else %}{% url 'corpus_dashboard' %}{% endif %}"
+     class="btn btn-outline-secondary">
+    Cancel
+  </a>
+</form>
+
+{% endblock %}

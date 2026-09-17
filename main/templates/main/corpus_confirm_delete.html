@@ -1,0 +1,20 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Delete Corpus{% endblock %}
+
+{% block content %}
+
+<h2>Delete corpus "{{ corpus.name }}"?</h2>
+
+<div class="alert alert-warning">
+  This removes the corpus and its grouping only. Its {{ corpus.documents.count }}
+  file(s) are kept and stay available to other corpora.
+</div>
+
+<form method="post">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-danger">Yes, delete this corpus</button>
+  <a href="{% url 'corpus_detail' corpus.id %}" class="btn btn-outline-secondary">Cancel</a>
+</form>
+
+{% endblock %}

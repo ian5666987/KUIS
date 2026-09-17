@@ -27,6 +27,21 @@ class Document(models.Model):
     def __str__(self):
         return self.title
     
+class Corpus(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+    description = models.TextField(blank=True)
+    documents = models.ManyToManyField(Document, related_name='corpora', blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = 'corpora'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class Token(models.Model):
     ORIGINAL = 'original'
     CORRECTED = 'corrected'

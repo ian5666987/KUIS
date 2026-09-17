@@ -1,0 +1,33 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Analysis{% endblock %}
+
+{% block content %}
+
+<h2 class="mb-4">Analysis</h2>
+
+{% include 'main/_corpus_selector.html' %}
+
+{% if selected_corpus_count %}
+  <p class="text-muted">
+    Pick a feature below. Your corpus selection stays put as you move between them.
+  </p>
+
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{% url 'word_frequency' %}" class="btn btn-primary">Word Frequency</a>
+    <a href="{% url 'collocations' %}" class="btn btn-secondary">Collocations</a>
+    <a href="{% url 'ngrams' %}" class="btn btn-success">N-grams</a>
+    <a href="{% url 'kwic' %}" class="btn btn-warning">KWIC</a>
+    <a href="{% url 'kwic_search' %}" class="btn btn-dark">KWIC (Fast)</a>
+  </div>
+{% else %}
+  <div class="alert alert-info">
+    Select at least one corpus above to unlock the analysis features.
+  </div>
+{% endif %}
+
+<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mt-4">
+    ← Back to Corpora
+</a>
+
+{% endblock %}

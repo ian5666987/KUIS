@@ -3,7 +3,9 @@
 {% block title %}Word Frequency{% endblock %}
 
 {% block content %}
-<h2>Word Frequency: {{ document.title }}</h2>
+<h2>Word Frequency</h2>
+
+{% include 'main/_corpus_selector.html' %}
 
 <form method="get" class="mb-3">
     <div class="form-check">
@@ -27,8 +29,8 @@
   {% endfor %}
 </table>
 
-<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Corpus
+<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
+    ← Back to Analysis
 </a>
 
 {% endblock %}

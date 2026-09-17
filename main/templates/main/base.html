@@ -13,7 +13,8 @@
 
      {% if user.is_authenticated %}
         <a class="nav-link d-inline text-white" href="{% url 'dashboard' %}">Dashboard</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'corpus_dashboard' %}">Corpus</a> |      
+        <a class="nav-link d-inline text-white" href="{% url 'corpus_dashboard' %}">Corpora</a> |
+        <a class="nav-link d-inline text-white" href="{% url 'analysis_home' %}">Analysis</a> |
         <a class="nav-link d-inline text-white" href="{% url 'profile' %}">Profile</a> |
         <form action="{% url 'logout' %}" method="post" class="d-inline">
             {% csrf_token %}
@@ -29,6 +30,14 @@
     <hr>
 
     <div class="container mt-4">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+
         {% block content %}
         {% endblock %}
     </div>

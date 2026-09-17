@@ -4,6 +4,8 @@
 
 <h2>KWIC Search (Token-based)</h2>
 
+{% include 'main/_corpus_selector.html' %}
+
 <form method="get" class="mb-3">
 
     <input type="text"
@@ -62,5 +64,9 @@
 </table>
 
 {% endif %}
+
+<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
+    ← Back to Analysis
+</a>
 
 {% endblock %}

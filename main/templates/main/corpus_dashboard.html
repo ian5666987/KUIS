@@ -1,52 +1,78 @@
 {% extends 'main/base.html' %}
 
-{% block title %}Corpus Dashboard{% endblock %}
+{% block title %}Corpora{% endblock %}
 
 {% block content %}
 
-<h2 class="mb-4">Corpus Dashboard</h2>
+<h2 class="mb-4">Corpora</h2>
 
-<a href="{% url 'upload_document' %}" class="btn btn-success mb-3">
-    + Upload New Document
-</a>
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a href="{% url 'analysis_home' %}" class="btn btn-primary">
+      Go to Analysis
+  </a>
+
+  {% if user.is_staff %}
+    <a href="{% url 'corpus_create' %}" class="btn btn-success">
+        + Create New Corpus
+    </a>
+
+    <a href="{% url 'upload_document' %}" class="btn btn-outline-success">
+        + Upload File
+    </a>
+  {% endif %}
+</div>
+
+{% if unassigned_count and user.is_staff %}
+  <div class="alert alert-warning">
+    {{ unassigned_count }} uploaded file(s) don't belong to any corpus yet, so they
+    are excluded from every analysis. Add them to a corpus to include them.
+  </div>
+{% endif %}
 
 <div class="row">
-  {% for doc in documents %}
+  {% for corpus in corpora %}
     <div class="col-md-6 mb-4">
       <div class="card shadow-sm">
         <div class="card-body">
 
-          <h5 class="card-title">{{ doc.title }}</h5>
-          <p class="text-muted">Uploaded: {{ doc.uploaded_at }}</p>
+          <h5 class="card-title">{{ corpus.name }}</h5>
+
+          <p class="text-muted mb-1">
+            {{ corpus.documents.count }} file(s) · created {{ corpus.created_at|date:"Y-m-d" }}
+          </p>
+
+          {% if corpus.description %}
+            <p class="card-text">{{ corpus.description }}</p>
+          {% endif %}
 
           <div class="d-flex flex-wrap gap-2">
-
-            <a href="{% url 'word_frequency' doc.id %}" class="btn btn-primary btn-sm">
-              Word Frequency
+            <a href="{% url 'corpus_detail' corpus.id %}" class="btn btn-outline-primary btn-sm">
+              View Files
             </a>
 
-            <a href="{% url 'collocations' doc.id %}" class="btn btn-secondary btn-sm">
-              Collocations
-            </a>
+            {% if user.is_staff %}
+              <a href="{% url 'corpus_edit' corpus.id %}" class="btn btn-outline-secondary btn-sm">
+                Edit
+              </a>
 
-            <a href="{% url 'ngrams' doc.id %}" class="btn btn-success btn-sm">
-              N-grams
-            </a>
-
-            <a href="{% url 'kwic_legacy' doc.id %}" class="btn btn-warning btn-sm">
-              KWIC (Legacy)
-            </a>
-
-            <a href="{% url 'kwic_search' %}" class="btn btn-dark btn-sm">
-              KWIC (Fast)
-            </a>
+              <a href="{% url 'corpus_delete' corpus.id %}" class="btn btn-outline-danger btn-sm">
+                Delete
+              </a>
+            {% endif %}
           </div>
 
         </div>
       </div>
     </div>
   {% empty %}
-    <p>No documents available.</p>
+    <p>
+      No corpora yet.
+      {% if user.is_staff %}
+        <a href="{% url 'corpus_create' %}">Create the first one</a>.
+      {% else %}
+        An administrator needs to create one before analysis is possible.
+      {% endif %}
+    </p>
   {% endfor %}
 </div>
 
