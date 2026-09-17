@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize', # thousands separators in result tables
     'main', #add this so that all in the folder "main" can be part of the apps
 ]
 

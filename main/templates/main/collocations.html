@@ -1,34 +1,27 @@
 {% extends 'main/base.html' %}
 
+{% block title %}Collocations{% endblock %}
+
 {% block content %}
-<h2>Collocations</h2>
+<div class="stack-lg">
 
-{% include 'main/_corpus_selector.html' %}
+  <div class="page-head">
+    <h1>Collocations</h1>
+    <p>
+      Counts for every pair of directly adjacent words. Pairs are collected within
+      each file, so a sequence is never invented across a file boundary.
+    </p>
+  </div>
 
-<form method="get" class="mb-3">
-    <div class="form-check">
-        <input type="checkbox" class="form-check-input" id="corrected" name="corrected" value="1"
-               {% if corrected %}checked{% endif %} onchange="this.form.submit()">
-        <label class="form-check-label" for="corrected">Show corrected text</label>
-    </div>
-</form>
+  {% include 'main/components/context_bar.html' %}
+  {% include 'main/components/analysis_nav.html' %}
 
-<table class="table">
-<tr>
-  <th>Word Pair</th>
-  <th>Count</th>
-</tr>
+  <div class="stack">
+    {% include 'main/components/mode_notice.html' %}
 
-{% for pair, count in collocations %}
-<tr>
-  <td>{{ pair.0 }} {{ pair.1 }}</td>
-  <td>{{ count }}</td>
-</tr>
-{% endfor %}
-</table>
+    {% url 'collocations_export_csv' as export_url %}
+    {% include 'main/components/frequency_results.html' with item_label='Word pair' unit='pairs' export_url=export_url %}
+  </div>
 
-<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Analysis
-</a>
-
+</div>
 {% endblock %}

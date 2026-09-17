@@ -1,0 +1,66 @@
+{% comment %} Multi-select corpus picker: search, bulk select/clear, live count, and the
+   metadata needed to choose (files, tokens, description). Rows are labels, so
+   the whole row is a click target and the checkbox stays the accessible name. {% endcomment %}
+
+{% load humanize %}
+
+<div data-picker>
+
+  {% if corpora %}
+    <div class="picker__tools">
+      <div class="picker__search">
+        <label class="visually-hidden" for="picker-search">Filter corpora by name</label>
+        <input type="search" id="picker-search" class="field" data-picker-search
+               placeholder="Filter corpora by name or description" autocomplete="off">
+      </div>
+
+      <button type="button" class="btn btn--sm" data-picker-all="select">Select all</button>
+      <button type="button" class="btn btn--sm" data-picker-all="clear">Clear all</button>
+
+      <span class="picker__count" data-picker-count aria-live="polite">
+        {{ selected_corpus_count }} of {{ corpus_total }} selected
+      </span>
+    </div>
+
+    <div class="picker__list">
+      {% for corpus in corpora %}
+        <label class="picker__row" data-picker-row
+               data-search="{{ corpus.name|lower }} {{ corpus.description|lower }}">
+          <input type="checkbox" name="corpus" value="{{ corpus.id }}"
+                 {% if corpus.id in selected_corpus_ids %}checked{% endif %}>
+
+          <span class="picker__name">{{ corpus.name }}</span>
+
+          <span class="picker__stats">
+            {{ corpus.document_count }} file{{ corpus.document_count|pluralize }} ·
+            {{ corpus.token_total|default:0|intcomma }} tokens
+          </span>
+
+          {% if corpus.description %}
+            <span class="picker__desc">{{ corpus.description }}</span>
+          {% endif %}
+        </label>
+      {% endfor %}
+
+      <p class="picker__empty" data-picker-none hidden>No corpus matches that filter.</p>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <button type="submit" class="btn btn--primary">Apply selection</button>
+
+      <span class="text-sm text-muted" data-picker-dirty hidden>
+        Selection changed — apply it to update the results.
+      </span>
+    </div>
+  {% else %}
+    <div class="picker__empty">
+      No corpora exist yet.
+      {% if user.is_staff %}
+        <a href="{% url 'corpus_create' %}">Create the first one</a> to enable analysis.
+      {% else %}
+        An administrator needs to create one before any analysis is possible.
+      {% endif %}
+    </div>
+  {% endif %}
+
+</div>

@@ -1,0 +1,110 @@
+{% comment %} Shared results block for every count-based analysis (word frequency,
+   collocations, n-grams). They differ only in what one row *is*, so the table
+   controls, the normalisation column and the states are defined once here.
+
+   Callers provide: item_label ("Word"), unit ("words"), export_url. {% endcomment %}
+
+{% load humanize kuis %}
+
+<div class="stats">
+  <div class="stats__item">
+    <div class="stats__label">Tokens analysed</div>
+    <div class="stats__value">{{ token_total|intcomma }}</div>
+    <div class="stats__note">{{ corrected|yesno:"corrected,original" }} text</div>
+  </div>
+  <div class="stats__item">
+    <div class="stats__label">Distinct {{ unit }}</div>
+    <div class="stats__value">{{ type_count|intcomma }}</div>
+    <div class="stats__note">types</div>
+  </div>
+  <div class="stats__item">
+    <div class="stats__label">{% if is_filtered %}Matching filter{% else %}Shown{% endif %}</div>
+    <div class="stats__value">{{ result_count|intcomma }}</div>
+    <div class="stats__note">{% if is_filtered %}of {{ type_count|intcomma }}{% else %}all rows{% endif %}</div>
+  </div>
+</div>
+
+<div class="toolbar" style="margin-top:14px;">
+  <form method="get" class="row" style="gap:8px; align-items:flex-end;">
+    {% hidden_params exclude="q,match,page" %}
+
+    <div class="toolbar__field">
+      <label class="field-label" for="filter-match">Filter</label>
+      <select name="match" id="filter-match" class="field field--inline">
+        {% for value, label in match_modes %}
+          <option value="{{ value }}" {% if match_mode == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="toolbar__field toolbar__field--grow">
+      <label class="field-label visually-hidden" for="filter-q">Filter text</label>
+      <input type="search" name="q" id="filter-q" class="field" value="{{ query }}"
+             placeholder="e.g. meng" autocomplete="off">
+    </div>
+
+    <button type="submit" class="btn">Apply</button>
+
+    {% if is_filtered %}
+      <a class="btn btn--quiet" href="{% qs q='' page='' %}" data-loading>Clear filter</a>
+    {% endif %}
+  </form>
+
+  <div class="toolbar__actions">
+    <span class="working" role="status">Working…</span>
+
+    <form method="get" class="row" style="gap:6px; align-items:center;">
+      {% hidden_params exclude="per_page,page" %}
+      <label class="field-label" for="per-page" style="margin:0;">Rows</label>
+      <select name="per_page" id="per-page" class="field field--inline" data-autosubmit>
+        {% for choice in per_page_choices %}
+          <option value="{{ choice }}" {% if per_page == choice %}selected{% endif %}>{{ choice }}</option>
+        {% endfor %}
+      </select>
+      <noscript><button type="submit" class="btn btn--sm">Set</button></noscript>
+    </form>
+
+    <a class="btn" href="{{ export_url }}{% qs page='' %}" download>
+      Export CSV
+    </a>
+  </div>
+</div>
+
+{% if rows %}
+  <div class="table-wrap" style="margin-top:14px;">
+    <table class="data">
+      <caption class="visually-hidden">
+        {{ item_label }} frequencies across the selected corpora, {{ corrected|yesno:"corrected,original" }} text
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col" class="rank">#</th>
+          {% include 'main/components/sort_header.html' with field='item' label=item_label default_dir='asc' numeric=False %}
+          {% include 'main/components/sort_header.html' with field='count' label='Frequency' default_dir='desc' numeric=True %}
+          <th scope="col" class="num">Per million</th>
+          <th scope="col" style="width:22%;">Relative size</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item, count in rows %}
+          <tr>
+            <td class="rank">{{ forloop.counter0|add:page_obj.start_index }}</td>
+            <td>{{ item }}</td>
+            <td class="num">{{ count|intcomma }}</td>
+            <td class="num">{{ count|per_million:token_total }}</td>
+            <td>
+              <span class="bar" style="width: {{ count|bar_width:max_count }}%;" aria-hidden="true"></span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include 'main/components/pagination.html' %}
+
+{% elif is_filtered %}
+  {% include 'main/components/state.html' with title='No matches for this filter' body='No item in the selected corpora matches that filter. Try a shorter string, or a different match type.' %}
+{% else %}
+  {% include 'main/components/state.html' with title='Nothing to count' body='The selected corpora contain no text in this mode. Check that the corpora have files attached.' action_url='/corpus/' action_label='Review corpora' %}
+{% endif %}

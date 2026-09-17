@@ -1,12 +1,50 @@
 {% extends 'main/base.html' %}
 
-{% block content %}
-<div class="text-center">
-    <h1>Welcome</h1>
-    <p class="lead">This is your Django starter project.</p>
+{% block title %}KUIS Corpus Explorer{% endblock %}
 
-    {% if not user.is_authenticated %}
-        <a href="{% url 'register' %}" class="btn btn-primary">Get Started</a>
-    {% endif %}
+{% block content %}
+<div class="stack-lg" style="max-width: 760px;">
+
+  <div class="page-head">
+    <h1>KUIS Corpus Explorer</h1>
+    <p>
+      A research tool for the KUIS Indonesian learner corpus. Group annotated files
+      into corpora, then run frequency, collocation, n-gram and concordance analyses
+      across any selection of them — reading either the learner text as written or
+      the corrected text.
+    </p>
+  </div>
+
+  <div class="panel">
+    <div class="panel__head"><h2>What it does</h2></div>
+    <ul class="feature-list">
+      <li><a href="{% url 'login' %}"><span class="feature-list__name">Word frequency &amp; collocations</span><span class="feature-list__desc">Ranked counts with per-million normalisation, filterable and exportable as CSV.</span></a></li>
+      <li><a href="{% url 'login' %}"><span class="feature-list__name">N-grams</span><span class="feature-list__desc">Recurring 2- to 5-word sequences, counted within each file.</span></a></li>
+      <li><a href="{% url 'login' %}"><span class="feature-list__name">Concordance (KWIC)</span><span class="feature-list__desc">Every occurrence of a word or phrase in context, sortable by either side.</span></a></li>
+      <li><a href="{% url 'login' %}"><span class="feature-list__name">Original vs corrected text</span><span class="feature-list__desc">Switch between the text as written and the corrections recorded on each annotated segment.</span></a></li>
+    </ul>
+  </div>
+
+  {% if not user.is_authenticated %}
+    <div class="row">
+      <a href="{% url 'login' %}" class="btn btn--primary">Log in</a>
+      <a href="{% url 'register' %}" class="btn">Create an account</a>
+    </div>
+    <p class="text-sm text-muted">
+      An account is required — analyses run over the shared corpus collection.
+      Uploading files and creating corpora is restricted to administrators.
+    </p>
+  {% else %}
+    <div class="row">
+      <a href="{% url 'analysis_home' %}" class="btn btn--primary" data-loading>Go to analysis</a>
+      <a href="{% url 'corpus_dashboard' %}" class="btn">Browse corpora</a>
+    </div>
+  {% endif %}
+
+  <p class="meta meta--sep">
+    <span>{{ corpus_count }} corpus{{ corpus_count|pluralize:"es" }}</span>
+    <span>{{ document_count }} file{{ document_count|pluralize }}</span>
+  </p>
+
 </div>
 {% endblock %}

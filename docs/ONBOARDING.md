@@ -8,8 +8,8 @@
 
 **KUIS** is a Django 6.0.4 web app for analyzing an Indonesian-language learner corpus. Admins upload XML files (plain text plus `<segment>` error annotations with corrections) and group them into named **corpora**; registered users then run corpus-linguistics reports across any multi-select of those corpora: word frequency, collocations, n-grams, and KWIC (keyword-in-context) search — each with an "original vs. corrected" text toggle.
 
-- **Architecture**: classic server-rendered Django monolith. No REST API, no JS framework/SPA — Bootstrap 5.3 (CSS only, via CDN) + Django template forms with `onchange="this.form.submit()"` auto-submit patterns for filters.
-- **Django structure**: one project package `config/` (settings/urls/wsgi/asgi) + one app `main/` (all models, views, forms, admin, templates, the XML parser, migrations, one management command). `info/` at repo root is **not code** — it holds a proposal PDF, two sample corpus XML files, and informal notes (not a README).
+- **Architecture**: classic server-rendered Django monolith. No REST API, no JS framework/SPA. The interface is a self-contained stylesheet (`main/static/main/kuis.css`, design tokens + components, no framework and no CDN) plus one optional progressive-enhancement script (`main/static/main/kuis.js`): corpus search, bulk select, panel collapse, auto-submit and the busy indicator. Every page works with JavaScript disabled.
+- **Django structure**: one project package `config/` (settings/urls/wsgi/asgi) + one app `main/` (all models, views, forms, admin, templates, template tags, static assets, the XML parser, migrations, one management command). `info/` at repo root is **not code** — it holds a proposal PDF, two sample corpus XML files, and informal notes (not a README).
 - **Two URL areas**: `/corpus/…` for curation (which files form which corpus) and `/analysis/…` for the reports. Analysis is never per-file — it always runs over the corpora currently selected in the session.
 - **Auth**: Django's built-in `auth.User` (no custom user model), with a three-tier access model driven purely by `is_staff` — no roles or permissions tables. See §5.
 - **Database**: PostgreSQL via `psycopg2-binary`, configured entirely through env vars (`django-environ`).
@@ -28,13 +28,13 @@
 | **Corpus list / detail** | registered | Browse corpora, their files, token counts, and which corpora overlap. Management buttons render only for admins | `main/views.py` (`corpus_dashboard`, `corpus_detail`), `main/templates/main/corpus_{dashboard,detail}.html` |
 | **Create / edit / delete corpus** | **admin** | Name + description, tick existing files, and/or upload new XML files inline. Deleting a corpus keeps its files | `main/views.py` (`corpus_create`, `corpus_edit`, `corpus_delete`), `main/forms.py` `CorpusForm`, `main/templates/main/corpus_{form,confirm_delete}.html` |
 | **Document upload** | **admin** | Standalone single-file upload (paste text or a UTF-8 file). `Document.save()` triggers token indexing via signal | `main/views.py` (`upload_document`), `main/forms.py` `DocumentForm`, `main/templates/main/upload_document.html` |
-| **Analysis hub** | registered | Corpus multi-select + links into every feature; the selection is remembered in the session | `main/views.py` (`analysis_home`), `main/templates/main/analysis_home.html` |
-| **Word Frequency** | registered | Top-20 word counts across the selected corpora | `main/views.py` (`word_frequency`), `main/corpus_parsing.py` `extract_word_streams`, `main/templates/main/word_frequency.html` |
-| **Collocations** | registered | Top-20 adjacent word-pair counts | `main/views.py` (`collocations`), `main/templates/main/collocations.html` |
-| **N-grams** | registered | Top-20 n-length word tuples; `n` is a 2–5 dropdown (`?n=`) | `main/views.py` (`ngrams`, `NGRAM_SIZES`), `main/templates/main/ngrams.html` |
-| **KWIC** | registered | Concordance search, sortable, paginated, live XML parse; each line attributed to its source document | `main/views.py` (`kwic`, `_kwic_results`), `main/templates/main/kwic.html` |
-| **KWIC Export CSV** | registered | Same query as KWIC, downloads CSV with a Document column | `main/views.py` (`kwic_export_csv`) |
-| **KWIC (Fast)** | registered | Token-table-backed search (DB query, not live parse), scoped to the selected corpora | `main/views.py` (`kwic_search`), `main/models.py` `Token`, `main/templates/main/kwic_search.html` |
+| **Analysis hub** | registered | Corpus multi-select + scope statistics + links into every feature; the selection is remembered in the session | `main/views.py` (`analysis_home`), `main/templates/main/analysis_home.html` |
+| **Word Frequency** | registered | Full ranked word counts with per-million normalisation; filter (contains/starts/ends/exact), sort by word or count, paginate | `main/views.py` (`word_frequency`), `main/corpus_parsing.py` `parse_document`, `main/templates/main/word_frequency.html` |
+| **Collocations** | registered | Adjacent word-pair counts, same table controls | `main/views.py` (`collocations`), `main/templates/main/collocations.html` |
+| **N-grams** | registered | n-length word tuples; `n` is a 2–5 segmented control (`?n=`), same table controls | `main/views.py` (`ngrams`, `NGRAM_SIZES`), `main/templates/main/ngrams.html` |
+| **KWIC** | registered | Concordance search over a live XML parse; word or phrase, context window 1–15, sortable by left/right/file, paginated, each line attributed to its file | `main/views.py` (`kwic`, `_kwic_results`), `main/templates/main/kwic.html` |
+| **Word index** (was "KWIC (Fast)") | registered | Same concordance view for a single word form, answered from the `Token` table instead of re-parsing; one query per document on the current page | `main/views.py` (`kwic_search`, `_word_index_matches`, `_hydrate_word_index`), `main/models.py` `Token`, `main/templates/main/kwic_search.html` |
+| **CSV export** | registered | Every analysis has an `/export/` route that re-runs the same query with the same filter and sort, unpaginated | `main/views.py` (`*_export_csv`, `_csv_response`) |
 | **Django Admin** | admin | `Document` and `Corpus` registered (`CorpusAdmin` uses `filter_horizontal` for the M2M) | `main/admin.py` |
 | **`retokenize` command** | CLI | Rebuilds all `Token` rows from current `Document.content`. Run after changing tokenization logic or editing a document's content | `main/management/commands/retokenize.py` |
 
@@ -55,13 +55,24 @@ main/
   forms.py             — RegisterForm, ContactForm, CorpusForm, DocumentForm
   admin.py             — registers Document + Corpus
   apps.py              — standard AppConfig, no hooks
-  corpus_parsing.py    — XML tokenizer: extract_word_streams()
-  tests.py             — empty stub, no tests exist anywhere in the repo
+  corpus_parsing.py    — XML tokenizer: parse_document() / extract_word_streams()
+  tests.py             — interface smoke tests (rendering, selection, modes,
+                         table controls, exports)
+  templatetags/kuis.py — hidden_params / qs / sort_url / aria_sort tags,
+                         per_million + bar_width filters (see §7)
+  static/main/kuis.css — the whole interface: design tokens, then components
+  static/main/kuis.js  — optional enhancements only; nothing depends on it
   management/commands/retokenize.py
   migrations/          — 0001-0006 (0006 is a data migration)
   templates/
     main/base.html               — layout, nav, messages block, auth conditionals
-    main/_corpus_selector.html   — shared corpus multi-select bar (see §7)
+    main/components/             — the shared UI vocabulary (see §7)
+      context_bar.html           — corpus selection + text mode, on every analysis page
+      corpus_picker.html         — multi-select with search, bulk actions, metadata
+      analysis_nav.html          — feature tabs
+      frequency_results.html     — stats + toolbar + table + pagination for count analyses
+      concordance_results.html   — shared KWIC table for both engines
+      sort_header.html, pagination.html, state.html, mode_notice.html
     main/analysis_home.html      — analysis hub
     main/corpus_dashboard.html, corpus_detail.html
     main/corpus_form.html, corpus_confirm_delete.html
@@ -73,7 +84,7 @@ main/
 ```
 
 **Representative flow — Word Frequency:**
-`GET /analysis/frequency/` → `views.word_frequency` → `_require_selection` (bounces to the hub if nothing is selected) → `_get_selected_documents(request)` resolves session corpus ids to a **`.distinct()`** document queryset → `_get_word_lists()` parses each document's XML into one word list per document → `Counter` → `.most_common(20)` → renders `word_frequency.html`, which includes `_corpus_selector.html` at the top.
+`GET /analysis/frequency/` → `views.word_frequency` → `_require_selection` (bounces to the hub if nothing is selected) → `_get_selected_documents(request)` resolves session corpus ids to a **`.distinct()`** document queryset → `_count_words()` parses each document into one word list per document and folds them into a `Counter` → `_rank_counter()` applies the filter, the sort and the pagination shared by all three count analyses → renders `word_frequency.html`, which includes `components/context_bar.html` at the top and delegates the results to `components/frequency_results.html`. The matching `/export/` route runs the same pipeline without pagination.
 
 **Representative flow — Fast KWIC:**
 `GET /analysis/kwic/search/?word=…` → `views.kwic_search` → queries the pre-built `Token` table filtered by `document__in=<selected documents>` rather than re-parsing XML. `Token` rows are populated at `Document` creation by the `post_save` signal `create_tokens` → `build_tokens()` → `extract_word_streams`.
@@ -97,7 +108,7 @@ main/
 </document>
 ```
 - `<segment>` marks an annotated error; `features` is a **semicolon-separated tag path** (`eror;<category>;<subcategory>;<leaf-code>`), depth varies by error type, and no fixed taxonomy is documented anywhere in the repo (only inferable from the two sample files in `info/`).
-- The parser falls back to flat (non-XML-aware) tokenization if the content isn't parseable XML or has no `<body>` — silent degradation, no error shown to the user.
+- The parser falls back to flat (non-XML-aware) tokenization if the content isn't parseable XML or has no `<body>`. `parse_document()` returns an `is_structured` flag for exactly this case; the analysis views collect the affected titles and the UI names them in corrected mode, where the fallback would otherwise look like an identical result for no reason.
 - Segments can **nest**; `_walk_body` (`main/corpus_parsing.py`) only walks direct children of `<body>` — see §5.
 
 ### Migrations
@@ -119,7 +130,7 @@ main/
 `ALLOWED_HOSTS = []` is **hardcoded** (not env-driven) — see §5. No `STATIC_ROOT`/`MEDIA_ROOT` configured (no static files exist; Bootstrap is CDN-only).
 
 ### Dependencies (`requirements.txt`)
-`Django==6.0.4`, `django-environ==0.11.2`, `psycopg2-binary==2.9.12`, plus transitive pins `asgiref==3.11.1`, `sqlparse==0.5.5`, `tzdata==2026.1`. No Pipfile/pyproject.toml.
+`Django==6.0.4`, `django-environ==0.11.2`, `psycopg2-binary==2.9.12`, plus transitive pins `asgiref==3.11.1`, `sqlparse==0.5.5`, `tzdata==2026.1`. No Pipfile/pyproject.toml. The interface adds no dependency: `django.contrib.humanize` (thousands separators) is the only new `INSTALLED_APPS` entry, and static files are served by `django.contrib.staticfiles` in development.
 
 ---
 
@@ -165,23 +176,32 @@ Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dash
 - **`Token` rows go stale on content edits.** They're built by the `post_save` signal on `Document` **creation** only; editing a document's content afterward leaves `Token`/fast-KWIC data out of sync. Run `python manage.py retokenize`.
 - **`Correction` vs `correction` attribute casing.** Sample files use both; `_walk_body` only reads capital-C `Correction`, so lowercase-attribute segments contribute nothing to the corrected word stream.
 - **Nested `<segment>` elements are only partially walked** by `_walk_body` (direct children of `<body>` only). Any future error-analysis feature should traverse with `body.iter('segment')` instead.
-- **Malformed XML degrades silently** to flat regex tokenization, with no user-facing warning.
+- **Malformed XML still degrades to flat regex tokenization**, but no longer silently: see `parse_document`'s `is_structured` flag and `components/mode_notice.html`.
 - **Performance**: analysis re-parses XML for every selected document on every request, so cost scales with the number of selected files. Fine at current volumes; `Token` is already the indexed fast path if word frequency ever needs `.values('word').annotate(Count('id'))` instead.
 - **`ALLOWED_HOSTS = []`** is hardcoded in `config/settings.py`, not env-driven — it rejects all requests once `DEBUG=False`, and it also blocks Django's test client (override it in-process when testing). Must be fixed before any real deployment.
-- **No automated tests** (`main/tests.py` is an empty stub). The dedupe and cross-document-boundary behaviors above are silent-wrong-answer risks and are the first things worth a `TestCase`.
+- **Tests**: `main/tests.py` covers page rendering, selection persistence and clearing, overlap dedupe, the text-mode substitution, the table controls and every CSV export. Run them against SQLite without a Postgres instance: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: python manage.py test main`. Django adds `testserver` to the hardcoded empty `ALLOWED_HOSTS` automatically, so no override is needed.
+- **Multi-line `{# … #}` template comments do not work.** Django's comment token is single-line only, so a multi-line `{# … #}` renders into the page as literal text. Use `{% comment %} … {% endcomment %}`.
 
 ---
 
-## 7. The Corpus Selector Pattern
+## 7. The Context Bar Pattern
 
-`main/templates/main/_corpus_selector.html` is included at the top of every analysis template and is what makes the selection survive navigation:
+`main/templates/main/components/context_bar.html` is included at the top of every analysis template. It holds the two pieces of state that apply to every feature — **which corpora** and **original vs corrected** — and is what makes them survive navigation:
 
 - It is a `method="get"` form with **no `action`**, so it submits back to whatever feature page it's currently on.
-- Checkboxes auto-submit via the codebase's `onchange="this.form.submit()"` idiom.
-- `views._resolve_selected_corpus_ids` writes the result to `request.session['selected_corpus_ids']`, so every other feature picks it up with no URL params at all.
-- Because ids also travel in the query string when submitted, feature URLs stay shareable.
+- It always carries the hidden `corpus_selection=1` marker. Unticking every box submits no `corpus` params at all, which is otherwise indistinguishable from "form not submitted"; without the marker a selection could never be cleared.
+- Text mode is a pair of radios (`corrected=0|1`), not a checkbox: "original" is a real choice, not the absence of one. They auto-submit; corpus changes are applied with a button, because a reload per tick is slow and disorienting when selecting several.
+- `views._resolve_selected_corpus_ids` writes the result to `request.session['selected_corpus_ids']`, so every other feature picks it up with no URL params at all. Ids also travel in the query string when submitted, so feature URLs stay shareable.
 
-To add a new analysis feature, follow the existing shape: `@login_required` → `_require_selection(request)` → `_get_selected_documents(request)` → `_get_word_lists(...)` → build a `Counter` → merge `_analysis_context(request, documents)` into the template context → include the selector partial in the template.
+**Parameters travel by tag, not by hand.** `main/templatetags/kuis.py` is what keeps several forms on one page from discarding each other's state:
+
+- `{% hidden_params exclude="q,match,page" %}` re-emits the whole current query string as hidden inputs minus the named keys. A form changes its own parameters and preserves everyone else's — including parameters added later, which is why no form has a hardcoded list of fields to carry.
+- `{% qs page=3 %}` rewrites the current query string for a link (empty value drops the key). Pagination, sort headers, "clear filter" and every export link use it.
+- `{% sort_url 'count' 'desc' %}` and `{% aria_sort 'count' %}` drive `components/sort_header.html`: clicking the active column flips direction, a new column starts at its natural direction and returns to page 1.
+
+**To add a new analysis feature**, follow the existing shape: `@login_required` → `_require_selection(request)` → `_get_selected_documents(request)` → `_count_words(...)` (or your own fold) → `_rank_counter(request, counter, total)` for the table controls → merge `_analysis_context(request, documents, feature='…')` into the context → in the template, include `components/context_bar.html`, `components/analysis_nav.html` (add a tab), and `components/frequency_results.html`. Add the feature's `/export/` route with `_csv_response` and `_sorted_rows_for_export` so it exports like every other one.
+
+**UI conventions worth keeping.** Numbers are right-aligned and tabular; sort direction and text mode are carried by a glyph and `aria-sort`/`aria-current`, never by colour alone; loading, empty and error are three distinct states (`components/state.html`, the `.notice` variants, and `body.is-loading`), because "still working" and "nothing found" must never look the same.
 
 ---
 

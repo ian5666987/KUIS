@@ -1,79 +1,138 @@
 {% extends 'main/base.html' %}
+{% load humanize kuis %}
 
 {% block title %}Corpora{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<h2 class="mb-4">Corpora</h2>
-
-<div class="d-flex flex-wrap gap-2 mb-3">
-  <a href="{% url 'analysis_home' %}" class="btn btn-primary">
-      Go to Analysis
-  </a>
-
-  {% if user.is_staff %}
-    <a href="{% url 'corpus_create' %}" class="btn btn-success">
-        + Create New Corpus
-    </a>
-
-    <a href="{% url 'upload_document' %}" class="btn btn-outline-success">
-        + Upload File
-    </a>
-  {% endif %}
-</div>
-
-{% if unassigned_count and user.is_staff %}
-  <div class="alert alert-warning">
-    {{ unassigned_count }} uploaded file(s) don't belong to any corpus yet, so they
-    are excluded from every analysis. Add them to a corpus to include them.
-  </div>
-{% endif %}
-
-<div class="row">
-  {% for corpus in corpora %}
-    <div class="col-md-6 mb-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-
-          <h5 class="card-title">{{ corpus.name }}</h5>
-
-          <p class="text-muted mb-1">
-            {{ corpus.documents.count }} file(s) · created {{ corpus.created_at|date:"Y-m-d" }}
-          </p>
-
-          {% if corpus.description %}
-            <p class="card-text">{{ corpus.description }}</p>
-          {% endif %}
-
-          <div class="d-flex flex-wrap gap-2">
-            <a href="{% url 'corpus_detail' corpus.id %}" class="btn btn-outline-primary btn-sm">
-              View Files
-            </a>
-
-            {% if user.is_staff %}
-              <a href="{% url 'corpus_edit' corpus.id %}" class="btn btn-outline-secondary btn-sm">
-                Edit
-              </a>
-
-              <a href="{% url 'corpus_delete' corpus.id %}" class="btn btn-outline-danger btn-sm">
-                Delete
-              </a>
-            {% endif %}
-          </div>
-
-        </div>
+  <div class="page-head">
+    <div class="row row--between">
+      <h1>Corpora</h1>
+      <div class="row">
+        <a href="{% url 'analysis_home' %}" class="btn btn--primary" data-loading>Go to analysis</a>
+        {% if user.is_staff %}
+          <a href="{% url 'corpus_create' %}" class="btn">New corpus</a>
+          <a href="{% url 'upload_document' %}" class="btn">Upload file</a>
+        {% endif %}
       </div>
     </div>
-  {% empty %}
     <p>
-      No corpora yet.
-      {% if user.is_staff %}
-        <a href="{% url 'corpus_create' %}">Create the first one</a>.
-      {% else %}
-        An administrator needs to create one before analysis is possible.
-      {% endif %}
+      A corpus is a named group of files. Files may belong to several corpora; an
+      analysis over overlapping corpora still counts each file once.
     </p>
-  {% endfor %}
-</div>
+  </div>
 
+  {% if unassigned_count and user.is_staff %}
+    <div class="notice notice--warning">
+      <span class="notice__icon" aria-hidden="true">!</span>
+      <span>
+        <strong>{{ unassigned_count }} file{{ unassigned_count|pluralize }} belong to no corpus</strong>
+        and are therefore excluded from every analysis. Add them to a corpus to include them.
+        They are listed at the bottom of this page.
+      </span>
+    </div>
+  {% endif %}
+
+  <form method="get" class="toolbar" role="search">
+    <div class="toolbar__field toolbar__field--grow">
+      <label class="field-label" for="corpus-q">Find a corpus</label>
+      <input type="search" name="q" id="corpus-q" class="field" value="{{ query }}"
+             placeholder="Search name and description" autocomplete="off">
+    </div>
+    <button type="submit" class="btn">Search</button>
+    {% if query %}<a class="btn btn--quiet" href="{% url 'corpus_dashboard' %}">Clear</a>{% endif %}
+
+    <div class="toolbar__actions">
+      <span class="text-sm text-muted">
+        {% if query %}{{ corpora|length }} of {{ corpus_total }}{% else %}{{ corpus_total }} corpus{{ corpus_total|pluralize:"es" }}{% endif %}
+      </span>
+    </div>
+  </form>
+
+  {% if corpora %}
+    <div class="table-wrap">
+      <table class="data">
+        <caption class="visually-hidden">Corpora, with file and token counts</caption>
+        <thead>
+          <tr>
+            {% include 'main/components/sort_header.html' with field='name' label='Corpus' default_dir='asc' numeric=False %}
+            {% include 'main/components/sort_header.html' with field='files' label='Files' default_dir='desc' numeric=True %}
+            {% include 'main/components/sort_header.html' with field='tokens' label='Tokens' default_dir='desc' numeric=True %}
+            {% include 'main/components/sort_header.html' with field='created' label='Created' default_dir='desc' numeric=False %}
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for corpus in corpora %}
+            <tr>
+              <th scope="row" style="font-weight:600;">
+                <a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a>
+                {% if corpus.id in selected_corpus_ids %}
+                  <span class="badge badge--accent" title="Included in your current analysis selection">Selected</span>
+                {% endif %}
+                {% if corpus.description %}
+                  <div class="text-sm text-muted" style="font-weight:400; max-width:60ch;">{{ corpus.description }}</div>
+                {% endif %}
+              </th>
+              <td class="num">{{ corpus.document_count }}</td>
+              <td class="num">{{ corpus.token_total|default:0|intcomma }}</td>
+              <td class="text-sm text-muted">
+                {{ corpus.created_at|date:"j M Y" }}
+                {% if corpus.created_by %}<br>by {{ corpus.created_by.username }}{% endif %}
+              </td>
+              <td>
+                <div class="row" style="gap:6px; flex-wrap:nowrap;">
+                  <a class="btn btn--sm" href="{% url 'corpus_detail' corpus.id %}">View</a>
+                  {% if user.is_staff %}
+                    <a class="btn btn--sm" href="{% url 'corpus_edit' corpus.id %}">Edit</a>
+                    <a class="btn btn--sm btn--danger" href="{% url 'corpus_delete' corpus.id %}">Delete</a>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif query %}
+    {% include 'main/components/state.html' with title='No corpus matches that search' body='Try a shorter search term, or clear the search to see every corpus.' action_url='/corpus/' action_label='Show all corpora' %}
+  {% else %}
+    {% include 'main/components/state.html' with title='No corpora yet' body='A corpus groups uploaded files so they can be analysed together. Nothing can be analysed until at least one exists.' %}
+  {% endif %}
+
+  {% if user.is_staff and unassigned_count %}
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Files in no corpus</h2>
+        <span class="badge">{{ unassigned_count }}</span>
+      </div>
+      <div class="table-wrap" style="border:0;">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col" class="num">Tokens</th>
+              <th scope="col">Uploaded</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for doc in unassigned %}
+              <tr>
+                <td>{{ doc.title }}</td>
+                <td class="num">{{ doc.token_count|intcomma }}</td>
+                <td class="text-sm text-muted">{{ doc.uploaded_at|date:"j M Y" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel__foot">
+        <span class="text-sm text-muted">Add these to a corpus to make them analysable.</span>
+        <a class="btn btn--sm" href="{% url 'corpus_create' %}">New corpus</a>
+      </div>
+    </div>
+  {% endif %}
+
+</div>
 {% endblock %}

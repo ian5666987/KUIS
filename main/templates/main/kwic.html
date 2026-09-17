@@ -1,167 +1,115 @@
 {% extends 'main/base.html' %}
+{% load humanize kuis %}
 
-{% block title %}KWIC{% endblock %}
+{% block title %}Concordance{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<style>
-    .kwic-soft {
-        color: #a2c1fa;
-        font-weight: 300;
-    }
+  <div class="page-head">
+    <h1>Concordance (KWIC)</h1>
+    <p>
+      Every occurrence of a word or phrase in its context. Phrases are matched as a
+      run of whole words, and each line names the file it came from.
+    </p>
+  </div>
 
-    .kwic-strong {
-        color: #111;
-        font-weight: 700;
-        background-color: #f8f9fa;
-        border-radius: 4px;
-        padding: 2px 4px;
-    }
+  {% include 'main/components/context_bar.html' %}
+  {% include 'main/components/analysis_nav.html' %}
 
-    .kwic-keyword {
-        background-color: #ffc107;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-weight: 700;
-    }
-</style>
+  <div class="stack">
 
-<h2>KWIC (Key Word in Context)</h2>
+    {% include 'main/components/mode_notice.html' %}
 
-{% include 'main/_corpus_selector.html' %}
+    {% if window_error %}
+      <div class="notice notice--error" role="alert">
+        <span class="notice__icon" aria-hidden="true">!</span>
+        <span>{{ window_error }}</span>
+      </div>
+    {% endif %}
 
-<!-- KWIC filter -->
-<form method="get" class="row g-2 mb-3">
+    <form method="get" class="toolbar">
+      {% hidden_params exclude="q,w,sort,page" %}
 
-    <div class="col-md-6">
-        <input type="text"
-               name="q"
-               value="{{ query }}"
-               class="form-control"
-               placeholder="Search word or phrase">
-    </div>
+      <div class="toolbar__field toolbar__field--grow">
+        <label class="field-label" for="kwic-q">Search term</label>
+        <input type="search" name="q" id="kwic-q" class="field" value="{{ query }}"
+               placeholder="A word, or a phrase such as “tetapi saya”" autocomplete="off">
+      </div>
 
-    <div class="col-md-2">
-        <input type="number"
-               name="w"
-               value="{{ window }}"
-               class="form-control"
-               min="1">
-    </div>
+      <div class="toolbar__field">
+        <label class="field-label" for="kwic-w">Context words each side</label>
+        <input type="number" name="w" id="kwic-w" class="field field--inline"
+               value="{{ window }}" min="{{ window_min }}" max="{{ window_max }}" style="width:6.5em;">
+      </div>
 
-    <div class="col-md-2">
-        <select name="sort" class="form-select">
-            <option value="center" {% if sort == "center" %}selected{% endif %}>Center</option>
-            <option value="left" {% if sort == "left" %}selected{% endif %}>Left</option>
-            <option value="right" {% if sort == "right" %}selected{% endif %}>Right</option>
+      <div class="toolbar__field">
+        <label class="field-label" for="kwic-sort">Sort lines by</label>
+        <select name="sort" id="kwic-sort" class="field field--inline">
+          {% for value, label in kwic_sorts %}
+            <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
-    </div>
+      </div>
 
-    <div class="col-md-2 d-flex align-items-center">
-        <div class="form-check">
-            <input type="checkbox" class="form-check-input" id="corrected" name="corrected" value="1"
-                   {% if corrected %}checked{% endif %}>
-            <label class="form-check-label" for="corrected">Corrected</label>
+      <div class="toolbar__actions">
+        <span class="working" role="status">Working…</span>
+        <button type="submit" class="btn btn--primary">Search</button>
+        {% if query %}
+          <a class="btn btn--quiet" href="{% qs q='' page='' %}" data-loading>Clear</a>
+        {% endif %}
+      </div>
+    </form>
+
+    {% if query %}
+
+      <div class="stats">
+        <div class="stats__item">
+          <div class="stats__label">Matching lines</div>
+          <div class="stats__value">{{ result_count|intcomma }}</div>
+          <div class="stats__note">for “{{ query }}”</div>
         </div>
-    </div>
+        <div class="stats__item">
+          <div class="stats__label">Files searched</div>
+          <div class="stats__value">{{ document_count }}</div>
+          <div class="stats__note">{{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }}</div>
+        </div>
+        <div class="stats__item">
+          <div class="stats__label">Tokens analysed</div>
+          <div class="stats__value">{{ selection_token_total|intcomma }}</div>
+          <div class="stats__note">{{ corrected|yesno:"corrected,original" }} text</div>
+        </div>
+      </div>
 
-    <div class="col-md-2">
-        <button class="btn btn-primary w-100">Search</button>
-    </div>
+      <div class="row row--between">
+        <form method="get" class="row" style="gap:6px; align-items:center;">
+          {% hidden_params exclude="per_page,page" %}
+          <label class="field-label" for="per-page" style="margin:0;">Lines per page</label>
+          <select name="per_page" id="per-page" class="field field--inline" data-autosubmit>
+            {% for choice in per_page_choices %}
+              <option value="{{ choice }}" {% if per_page == choice %}selected{% endif %}>{{ choice }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button type="submit" class="btn btn--sm">Set</button></noscript>
+        </form>
 
-</form>
+        {% if result_count %}
+          <a class="btn" href="{% url 'kwic_export_csv' %}{% qs page='' %}" download>
+            Export {{ result_count|intcomma }} line{{ result_count|pluralize }} as CSV
+          </a>
+        {% endif %}
+      </div>
 
-<a class="btn btn-success mb-3"
-   href="{% url 'kwic_export_csv' %}?q={{ query }}&w={{ window }}&corrected={{ corrected|yesno:"1,0" }}">
-   Export CSV
-</a>
+      {% if result_count %}
+        {% include 'main/components/concordance_results.html' with rows=results %}
+      {% else %}
+        {% include 'main/components/state.html' with title='No occurrences found' body='That word or phrase does not occur in the selected corpora in this text mode. Check the spelling, widen the corpus selection, or try the other text mode.' %}
+      {% endif %}
 
-<!-- Results -->
-{% if query %}
-<table class="table table-bordered table-sm">
-
-    <thead>
-        <tr>
-            <th>Document</th>
-            <th>Left Context</th>
-            <th>Keyword</th>
-            <th>Right Context</th>
-        </tr>
-    </thead>
-
-    <tbody>
-    {% for item in results %}
-        <tr>
-
-            <!-- DOCUMENT -->
-            <td class="small text-muted">{{ item.document }}</td>
-
-            <!-- LEFT -->
-            <td
-             class="font-monospace
-                {% if sort == 'left' %}kwic-strong{% else %}kwic-soft{% endif %}">
-                {{ item.left|join:" " }}
-            </td>
-
-            <!-- KEYWORD -->
-            <td class="text-center font-monospace">
-                {% for w in item.keyword %}
-                    <span class="kwic-keyword">{{ w }}</span>
-                {% endfor %}
-            </td>
-
-            <!-- RIGHT -->
-            <td class="font-monospace
-                {% if sort == 'right' %}kwic-strong{% else %}kwic-soft{% endif %}">
-                {{ item.right|join:" " }}
-            </td>
-
-        </tr>
-    {% empty %}
-        <tr>
-            <td colspan="4">No matches found</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-
-</table>
-
-{% if page_obj.has_other_pages %}
-<nav class="mt-4">
-  <ul class="pagination">
-
-    {% if page_obj.has_previous %}
-      <li class="page-item">
-        <a class="page-link"
-           href="?q={{ query }}&w={{ window }}&sort={{ sort }}&page={{ page_obj.previous_page_number }}">
-          Previous
-        </a>
-      </li>
+    {% else %}
+      {% include 'main/components/state.html' with title='Enter a search term' body='Type a word or a phrase above to see every occurrence in context across the selected corpora.' %}
     {% endif %}
 
-    <li class="page-item disabled">
-      <span class="page-link">
-        Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-      </span>
-    </li>
-
-    {% if page_obj.has_next %}
-      <li class="page-item">
-        <a class="page-link"
-           href="?q={{ query }}&w={{ window }}&sort={{ sort }}&page={{ page_obj.next_page_number }}">
-          Next
-        </a>
-      </li>
-    {% endif %}
-
-  </ul>
-</nav>
-{% endif %}
-
-{% endif %}
-
-<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Analysis
-</a>
-
+  </div>
+</div>
 {% endblock %}

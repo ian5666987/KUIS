@@ -1,0 +1,77 @@
+{% comment %} Analysis context bar — the one component that appears on every analysis page.
+
+   It answers two questions that must never require scrolling or navigating to
+   answer: *which corpora is this running over* and *am I reading original or
+   corrected text*. Both controls live in a single GET form; the rest of the
+   feature's parameters ride along as hidden inputs, so changing corpora never
+   wipes a query, an n-gram size or a sort.
+
+   Without JavaScript the picker is simply always open and applied with its
+   button; the enhancement only collapses it and adds search / bulk selection. {% endcomment %}
+
+{% load humanize kuis %}
+
+<form method="get" class="context" data-context data-open="true">
+  {% comment %} Marker so the view can tell "submitted with nothing ticked" apart from
+     "not submitted at all" — otherwise a selection could never be cleared. {% endcomment %}
+  <input type="hidden" name="corpus_selection" value="1">
+  {% hidden_params exclude="corpus,corpus_selection,corrected,page" %}
+
+  <div class="context__summary">
+
+    <div class="context__item">
+      <span class="context__label" id="ctx-corpora">Corpora in this analysis</span>
+      <span class="context__value">
+        {% if selected_corpus_count %}
+          {% for corpus in selected_corpora %}{% if forloop.counter < 4 %}{{ corpus.name }}{% if not forloop.last and forloop.counter < 3 %}, {% endif %}{% endif %}{% endfor %}{% if selected_corpus_count > 3 %} +{{ selected_corpus_count|add:"-3" }} more{% endif %}
+        {% else %}
+          <span class="context__value--weak">None selected</span>
+        {% endif %}
+      </span>
+    </div>
+
+    <div class="context__sep" aria-hidden="true"></div>
+
+    <div class="context__item">
+      <span class="context__label">Scope</span>
+      <span class="context__value context__value--weak">
+        {{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }} ·
+        {{ document_count }} file{{ document_count|pluralize }} ·
+        {{ selection_token_total|intcomma }} tokens
+      </span>
+    </div>
+
+    <div class="context__sep" aria-hidden="true"></div>
+
+    <div class="context__item">
+      <span class="context__label" id="ctx-mode">Text mode</span>
+      {% comment %} Radios rather than a checkbox: "Original" is a real choice, not the
+         absence of one, and both readings are always visible. {% endcomment %}
+      <div class="seg" role="group" aria-labelledby="ctx-mode">
+        <input type="radio" id="mode-original" name="corrected" value="0"
+               {% if not corrected %}checked{% endif %} data-autosubmit>
+        <label for="mode-original">Original</label>
+
+        <input type="radio" id="mode-corrected" name="corrected" value="1"
+               {% if corrected %}checked{% endif %} data-autosubmit>
+        <label for="mode-corrected">Corrected</label>
+      </div>
+    </div>
+
+    <div class="context__item" style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+      <span class="working" role="status">Working…</span>
+      <button type="button" class="btn" data-context-toggle
+              aria-expanded="true" aria-controls="corpus-panel">Change selection</button>
+    </div>
+  </div>
+
+  <div class="context__panel" id="corpus-panel">
+    <p class="text-sm text-muted" style="margin-bottom:10px; max-width:70ch;">
+      <strong>Original</strong> counts the learner text as written.
+      <strong>Corrected</strong> substitutes the correction recorded on each annotated
+      segment. Files without segment annotations read the same in both modes.
+    </p>
+
+    {% include 'main/components/corpus_picker.html' %}
+  </div>
+</form>

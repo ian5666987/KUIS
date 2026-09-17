@@ -1,0 +1,38 @@
+{% comment %} Shared concordance table for both KWIC engines. The node is centred and the
+   two contexts read outward from it, which is what makes a concordance
+   scannable; the sorted side is set in full-strength ink so the eye knows
+   which column carries the ordering. {% endcomment %}
+
+{% load humanize %}
+
+{% if rows %}
+  <div class="table-wrap" style="margin-top:14px;">
+    <table class="data kwic data--fixed">
+      <caption class="visually-hidden">
+        Concordance lines, {{ corrected|yesno:"corrected,original" }} text
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col" style="width:16%;">File</th>
+          <th scope="col" class="kwic__left" style="width:34%;">Left context</th>
+          <th scope="col" style="width:16%; text-align:center;">Node</th>
+          <th scope="col" style="width:34%;">Right context</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in rows %}
+          <tr>
+            <td class="kwic__doc" title="{{ line.document }}">{{ line.document }}</td>
+            <td class="kwic__left {% if sort == 'left' %}is-sorted{% endif %}"><span>{{ line.left|join:" " }}</span></td>
+            <td class="kwic__node">
+              {% for word in line.keyword %}<mark>{{ word }}</mark>{% if not forloop.last %} {% endif %}{% endfor %}
+            </td>
+            <td class="kwic__right {% if sort == 'right' %}is-sorted{% endif %}">{{ line.right|join:" " }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include 'main/components/pagination.html' with unit='lines' %}
+{% endif %}

@@ -1,43 +1,44 @@
 {% extends 'main/base.html' %}
+{% load kuis %}
+
+{% block title %}{{ n }}-grams{% endblock %}
 
 {% block content %}
-<h2>{{ n }}-grams</h2>
+<div class="stack-lg">
 
-{% include 'main/_corpus_selector.html' %}
+  <div class="page-head">
+    <h1>N-grams</h1>
+    <p>Recurring sequences of {{ n }} words, counted within each file.</p>
+  </div>
 
-<form method="get" class="mb-3 d-flex align-items-center gap-3">
-    <div>
-        <label for="n" class="form-label mb-0">N-gram size:</label>
-        <select name="n" id="n" class="form-select w-auto d-inline-block" onchange="this.form.submit()">
-            {% for size in ngram_sizes %}
-            <option value="{{ size }}" {% if size == n %}selected{% endif %}>{{ size }}</option>
-            {% endfor %}
-        </select>
-    </div>
+  {% include 'main/components/context_bar.html' %}
+  {% include 'main/components/analysis_nav.html' %}
 
-    <div class="form-check mb-0">
-        <input type="checkbox" class="form-check-input" id="corrected" name="corrected" value="1"
-               {% if corrected %}checked{% endif %} onchange="this.form.submit()">
-        <label class="form-check-label" for="corrected">Show corrected text</label>
-    </div>
-</form>
+  <div class="stack">
+    {% include 'main/components/mode_notice.html' %}
 
-<table class="table">
-<tr>
-  <th>N-gram</th>
-  <th>Count</th>
-</tr>
+    {% comment %} Configuration changes what is computed, so it sits apart from the table
+       controls that only change what is displayed. {% endcomment %}
+    <form method="get" class="toolbar">
+      {% hidden_params exclude="n,page" %}
 
-{% for gram, count in ngrams %}
-<tr>
-  <td>{{ gram|join:" " }}</td>
-  <td>{{ count }}</td>
-</tr>
-{% endfor %}
-</table>
+      <div class="toolbar__field">
+        <span class="field-label" id="ngram-size-label">Sequence length</span>
+        <div class="seg" role="group" aria-labelledby="ngram-size-label">
+          {% for size in ngram_sizes %}
+            <input type="radio" id="n-{{ size }}" name="n" value="{{ size }}"
+                   {% if size == n %}checked{% endif %} data-autosubmit>
+            <label for="n-{{ size }}">{{ size }} words</label>
+          {% endfor %}
+        </div>
+      </div>
 
-<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Analysis
-</a>
+      <noscript><button type="submit" class="btn">Apply</button></noscript>
+    </form>
 
+    {% url 'ngrams_export_csv' as export_url %}
+    {% include 'main/components/frequency_results.html' with item_label=n|stringformat:"s"|add:"-gram" unit='sequences' export_url=export_url %}
+  </div>
+
+</div>
 {% endblock %}

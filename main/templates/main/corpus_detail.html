@@ -1,57 +1,84 @@
 {% extends 'main/base.html' %}
+{% load humanize %}
 
 {% block title %}{{ corpus.name }}{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<h2>{{ corpus.name }}</h2>
+  <div class="page-head">
+    <p class="crumbs">
+      <a href="{% url 'corpus_dashboard' %}">Corpora</a><span>/</span>{{ corpus.name }}
+    </p>
 
-<p class="text-muted">
-  {{ documents|length }} file(s) · created {{ corpus.created_at|date:"Y-m-d" }}
-  {% if corpus.created_by %} by {{ corpus.created_by.username }}{% endif %}
-</p>
+    <div class="row row--between">
+      <h1>{{ corpus.name }}</h1>
+      <div class="row">
+        {% if is_selected %}
+          <span class="badge badge--accent">In your analysis selection</span>
+        {% endif %}
+        <a class="btn btn--primary" href="{% url 'analysis_home' %}" data-loading>Go to analysis</a>
+        {% if user.is_staff %}
+          <a class="btn" href="{% url 'corpus_edit' corpus.id %}">Edit</a>
+          <a class="btn btn--danger" href="{% url 'corpus_delete' corpus.id %}">Delete</a>
+        {% endif %}
+      </div>
+    </div>
 
-{% if corpus.description %}
-  <p>{{ corpus.description }}</p>
-{% endif %}
+    {% if corpus.description %}<p>{{ corpus.description }}</p>{% endif %}
 
-{% if user.is_staff %}
-  <div class="d-flex flex-wrap gap-2 mb-3">
-    <a href="{% url 'corpus_edit' corpus.id %}" class="btn btn-secondary btn-sm">Edit</a>
-    <a href="{% url 'corpus_delete' corpus.id %}" class="btn btn-outline-danger btn-sm">Delete</a>
+    <p class="meta meta--sep">
+      <span>Created {{ corpus.created_at|date:"j M Y" }}</span>
+      {% if corpus.created_by %}<span>by {{ corpus.created_by.username }}</span>{% endif %}
+    </p>
   </div>
-{% endif %}
 
-<table class="table">
-  <thead>
-    <tr>
-      <th>File</th>
-      <th>Uploaded</th>
-      <th>Tokens</th>
-      <th>Also in</th>
-    </tr>
-  </thead>
+  <div class="stats">
+    <div class="stats__item">
+      <div class="stats__label">Files</div>
+      <div class="stats__value">{{ document_count }}</div>
+    </div>
+    <div class="stats__item">
+      <div class="stats__label">Tokens · original</div>
+      <div class="stats__value">{{ token_total|intcomma }}</div>
+    </div>
+    <div class="stats__item">
+      <div class="stats__label">Tokens · corrected</div>
+      <div class="stats__value">{{ token_total_corrected|intcomma }}</div>
+    </div>
+  </div>
 
-  <tbody>
-    {% for doc in documents %}
-      <tr>
-        <td>{{ doc.title }}</td>
-        <td>{{ doc.uploaded_at|date:"Y-m-d" }}</td>
-        <td>{{ doc.token_count }}</td>
-        <td class="text-muted small">
-          {% for other in doc.corpora.all %}
-            {% if other.id != corpus.id %}{{ other.name }}{% if not forloop.last %}, {% endif %}{% endif %}
+  {% if documents %}
+    <div class="table-wrap">
+      <table class="data">
+        <caption class="visually-hidden">Files in {{ corpus.name }}</caption>
+        <thead>
+          <tr>
+            {% include 'main/components/sort_header.html' with field='title' label='File' default_dir='asc' numeric=False %}
+            {% include 'main/components/sort_header.html' with field='tokens' label='Tokens · original' default_dir='desc' numeric=True %}
+            <th scope="col" class="num">Tokens · corrected</th>
+            {% include 'main/components/sort_header.html' with field='uploaded' label='Uploaded' default_dir='desc' numeric=False %}
+            <th scope="col">Also in</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for doc in documents %}
+            <tr>
+              <th scope="row" style="font-weight:500;">{{ doc.title }}</th>
+              <td class="num">{{ doc.token_count|intcomma }}</td>
+              <td class="num">{{ doc.token_count_corrected|intcomma }}</td>
+              <td class="text-sm text-muted">{{ doc.uploaded_at|date:"j M Y" }}</td>
+              <td class="text-sm text-muted">
+                {% for other in doc.corpora.all %}{% if other.id != corpus.id %}<a href="{% url 'corpus_detail' other.id %}">{{ other.name }}</a>{% if not forloop.last %}, {% endif %}{% endif %}{% empty %}—{% endfor %}
+              </td>
+            </tr>
           {% endfor %}
-        </td>
-      </tr>
-    {% empty %}
-      <tr><td colspan="4">This corpus has no files.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    {% include 'main/components/state.html' with title='This corpus has no files' body='An empty corpus contributes nothing to an analysis. Edit it to attach existing files or upload new ones.' %}
+  {% endif %}
 
-<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Corpora
-</a>
-
+</div>
 {% endblock %}

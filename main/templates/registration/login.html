@@ -1,31 +1,44 @@
 {% extends 'main/base.html' %}
-{% block title %}Login{% endblock %}
+
+{% block title %}Log in{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
+
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-5">
+<div class="stack-lg">
 
-    <h2 class="mb-4">Login</h2>
-
-    {% if form.errors %}
-      <div class="alert alert-danger">Invalid credentials</div>
-    {% endif %}
-
-    <form method="post">
-      {% csrf_token %}
-
-      <div class="mb-3">
-        <label class="form-label">Username</label>
-        {{ form.username }}
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Password</label>
-        {{ form.password }}
-      </div>
-
-      <button class="btn btn-primary w-100">Login</button>
-    </form>
-
+  <div class="page-head">
+    <h1>Log in</h1>
+    <p>Analyses run over the shared corpus collection, so an account is required.</p>
   </div>
+
+  {% if form.errors %}
+    <div class="notice notice--error" role="alert">
+      <span class="notice__icon" aria-hidden="true">!</span>
+      <span>That username and password don’t match an account. Check both and try again.</span>
+    </div>
+  {% endif %}
+
+  <form method="post" class="stack">
+    {% csrf_token %}
+
+    <div class="panel">
+      <div class="panel__body stack">
+        <div class="field-group">
+          <label class="field-label" for="{{ form.username.id_for_label }}">Username</label>
+          {{ form.username }}
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="{{ form.password.id_for_label }}">Password</label>
+          {{ form.password }}
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn btn--primary">Log in</button>
+      <a class="btn btn--quiet" href="{% url 'register' %}">Create an account</a>
+    </div>
+  </form>
+
 </div>
 {% endblock %}

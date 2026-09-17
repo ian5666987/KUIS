@@ -1,45 +1,69 @@
-<!DOCTYPE html>
-<html>
+{% load static %}<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>{% block title %}My Site{% endblock %}</title>
-    <!--Bootstrap should be put in the head-->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Corpus Explorer{% endblock %} · KUIS</title>
+    <link rel="stylesheet" href="{% static 'main/kuis.css' %}">
 </head>
 <body>
-    <nav class="bg-dark p-3">
-        <a class="nav-link d-inline text-white" href="{% url 'home' %}">Home</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'about' %}">About</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'contact' %}">Contact</a> |
+    <a class="skip-link" href="#main">Skip to content</a>
 
-     {% if user.is_authenticated %}
-        <a class="nav-link d-inline text-white" href="{% url 'dashboard' %}">Dashboard</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'corpus_dashboard' %}">Corpora</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'analysis_home' %}">Analysis</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'profile' %}">Profile</a> |
-        <form action="{% url 'logout' %}" method="post" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-link nav-link d-inline p-0 m-0 align-baseline text-white">
-                Logout
-            </button>
-        </form>    
-      {% else %}
-        <a class="nav-link d-inline text-white" href="{% url 'login' %}">Login</a> |
-        <a class="nav-link d-inline text-white" href="{% url 'register' %}">Register</a> |
-      {% endif %}
-    </nav>
-    <hr>
+    {% comment %} Navigation shows progress, not decoration: one row, current section marked
+       with weight and a rule, never colour alone. {% endcomment %}
+    <div id="loading-bar" aria-hidden="true"></div>
 
-    <div class="container mt-4">
+    <header class="masthead">
+      <div class="masthead__inner">
+        <a class="brand" href="{% if user.is_authenticated %}{% url 'dashboard' %}{% else %}{% url 'home' %}{% endif %}">
+          KUIS <span>Corpus Explorer</span>
+        </a>
+
+        <nav class="nav" aria-label="Main">
+          {% if user.is_authenticated %}
+            <a href="{% url 'dashboard' %}" {% if request.path == '/dashboard/' %}aria-current="page"{% endif %}>Overview</a>
+            <a href="{% url 'corpus_dashboard' %}" {% if '/corpus' in request.path %}aria-current="page"{% endif %}>Corpora</a>
+            <a href="{% url 'analysis_home' %}" {% if '/analysis' in request.path %}aria-current="page"{% endif %}>Analysis</a>
+          {% else %}
+            <a href="{% url 'home' %}" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
+          {% endif %}
+          <a href="{% url 'about' %}" {% if '/about' in request.path %}aria-current="page"{% endif %}>About</a>
+          <a href="{% url 'contact' %}" {% if '/contact' in request.path %}aria-current="page"{% endif %}>Contact</a>
+        </nav>
+
+        <div class="masthead__user">
+          {% if user.is_authenticated %}
+            {% if user.is_staff %}
+              <a href="/admin/" class="text-sm">Django admin</a>
+            {% endif %}
+            <a href="{% url 'profile' %}">{{ user.username }}</a>
+            <form action="{% url 'logout' %}" method="post" data-no-loading>
+              {% csrf_token %}
+              <button type="submit" class="btn btn--sm">Log out</button>
+            </form>
+          {% else %}
+            <a href="{% url 'login' %}">Log in</a>
+            <a href="{% url 'register' %}" class="btn btn--sm">Register</a>
+          {% endif %}
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="page {% block page_class %}{% endblock %}">
         {% if messages %}
+          <div class="stack" role="status" aria-live="polite" style="margin-bottom: 20px;">
             {% for message in messages %}
-                <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %}">
-                    {{ message }}
-                </div>
+              <div class="notice notice--{% if message.tags == 'error' %}error{% elif message.tags == 'warning' %}warning{% elif message.tags == 'success' %}success{% else %}info{% endif %}">
+                <span class="notice__icon" aria-hidden="true">{% if message.tags == 'error' %}!{% elif message.tags == 'warning' %}!{% elif message.tags == 'success' %}&check;{% else %}i{% endif %}</span>
+                <span>{{ message }}</span>
+              </div>
             {% endfor %}
+          </div>
         {% endif %}
 
-        {% block content %}
-        {% endblock %}
-    </div>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{% static 'main/kuis.js' %}" defer></script>
 </body>
 </html>

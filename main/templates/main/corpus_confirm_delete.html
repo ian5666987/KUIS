@@ -1,20 +1,33 @@
 {% extends 'main/base.html' %}
 
-{% block title %}Delete Corpus{% endblock %}
+{% block title %}Delete corpus{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<h2>Delete corpus "{{ corpus.name }}"?</h2>
+  <div class="page-head">
+    <p class="crumbs">
+      <a href="{% url 'corpus_dashboard' %}">Corpora</a><span>/</span>
+      <a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a><span>/</span>Delete
+    </p>
+    <h1>Delete “{{ corpus.name }}”?</h1>
+  </div>
 
-<div class="alert alert-warning">
-  This removes the corpus and its grouping only. Its {{ corpus.documents.count }}
-  file(s) are kept and stay available to other corpora.
+  <div class="notice notice--warning">
+    <span class="notice__icon" aria-hidden="true">!</span>
+    <span>
+      This removes the grouping only. Its {{ corpus.documents.count }} file{{ corpus.documents.count|pluralize }}
+      are kept and stay available to other corpora. Any analysis currently scoped to this
+      corpus will drop it from the selection.
+    </span>
+  </div>
+
+  <form method="post" class="row">
+    {% csrf_token %}
+    <button type="submit" class="btn btn--danger">Delete this corpus</button>
+    <a class="btn" href="{% url 'corpus_detail' corpus.id %}">Cancel</a>
+  </form>
+
 </div>
-
-<form method="post">
-  {% csrf_token %}
-  <button type="submit" class="btn btn-danger">Yes, delete this corpus</button>
-  <a href="{% url 'corpus_detail' corpus.id %}" class="btn btn-outline-secondary">Cancel</a>
-</form>
-
 {% endblock %}

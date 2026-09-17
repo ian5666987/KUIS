@@ -1,33 +1,87 @@
 {% extends 'main/base.html' %}
+{% load humanize %}
 
 {% block title %}Analysis{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<h2 class="mb-4">Analysis</h2>
-
-{% include 'main/_corpus_selector.html' %}
-
-{% if selected_corpus_count %}
-  <p class="text-muted">
-    Pick a feature below. Your corpus selection stays put as you move between them.
-  </p>
-
-  <div class="d-flex flex-wrap gap-2">
-    <a href="{% url 'word_frequency' %}" class="btn btn-primary">Word Frequency</a>
-    <a href="{% url 'collocations' %}" class="btn btn-secondary">Collocations</a>
-    <a href="{% url 'ngrams' %}" class="btn btn-success">N-grams</a>
-    <a href="{% url 'kwic' %}" class="btn btn-warning">KWIC</a>
-    <a href="{% url 'kwic_search' %}" class="btn btn-dark">KWIC (Fast)</a>
+  <div class="page-head">
+    <h1>Analysis</h1>
+    <p>
+      Choose the corpora once; every feature below reads the same selection and
+      text mode until you change them.
+    </p>
   </div>
-{% else %}
-  <div class="alert alert-info">
-    Select at least one corpus above to unlock the analysis features.
-  </div>
-{% endif %}
 
-<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mt-4">
-    ← Back to Corpora
-</a>
+  {% include 'main/components/context_bar.html' %}
 
+  {% include 'main/components/analysis_nav.html' %}
+
+  {% if selected_corpus_count %}
+
+    <div class="stats">
+      <div class="stats__item">
+        <div class="stats__label">Corpora</div>
+        <div class="stats__value">{{ selected_corpus_count }}</div>
+        <div class="stats__note">of {{ corpus_total }} available</div>
+      </div>
+      <div class="stats__item">
+        <div class="stats__label">Files</div>
+        <div class="stats__value">{{ document_count }}</div>
+        <div class="stats__note">deduplicated across corpora</div>
+      </div>
+      <div class="stats__item">
+        <div class="stats__label">Tokens · original</div>
+        <div class="stats__value">{{ token_total|intcomma }}</div>
+        <div class="stats__note">text as written</div>
+      </div>
+      <div class="stats__item">
+        <div class="stats__label">Tokens · corrected</div>
+        <div class="stats__value">{{ token_total_corrected|intcomma }}</div>
+        <div class="stats__note">with corrections applied</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head"><h2>Features</h2></div>
+      <ul class="feature-list">
+        <li>
+          <a href="{% url 'word_frequency' %}" data-loading>
+            <span class="feature-list__name">Word frequency</span>
+            <span class="feature-list__desc">How often each word form occurs, with a per-million rate so corpora of different sizes stay comparable.</span>
+          </a>
+        </li>
+        <li>
+          <a href="{% url 'collocations' %}" data-loading>
+            <span class="feature-list__name">Collocations</span>
+            <span class="feature-list__desc">Counts for every adjacent word pair. Pairs never run across a file boundary.</span>
+          </a>
+        </li>
+        <li>
+          <a href="{% url 'ngrams' %}" data-loading>
+            <span class="feature-list__name">N-grams</span>
+            <span class="feature-list__desc">Recurring sequences of 2 to 5 words — the standard way to surface fixed expressions.</span>
+          </a>
+        </li>
+        <li>
+          <a href="{% url 'kwic' %}" data-loading>
+            <span class="feature-list__name">Concordance (KWIC)</span>
+            <span class="feature-list__desc">Every occurrence of a word or phrase in context, sortable by the words to either side.</span>
+          </a>
+        </li>
+        <li>
+          <a href="{% url 'kwic_search' %}" data-loading>
+            <span class="feature-list__name">Word index</span>
+            <span class="feature-list__desc">The same concordance view for a single word form, answered from the pre-built index — fastest on large selections.</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+
+  {% else %}
+    {% include 'main/components/state.html' with title='No corpora selected' body='Analysis always runs over one or more corpora. Open “Change selection” above and tick the corpora you want to work with.' %}
+  {% endif %}
+
+</div>
 {% endblock %}

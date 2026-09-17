@@ -1,72 +1,106 @@
 {% extends 'main/base.html' %}
+{% load humanize kuis %}
+
+{% block title %}Word index{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<h2>KWIC Search (Token-based)</h2>
+  <div class="page-head">
+    <h1>Word index</h1>
+    <p>
+      The same concordance view for a single word form, answered from the pre-built
+      token index rather than by re-reading the files — the faster option on large
+      selections. Use <a href="{% url 'kwic' %}">Concordance</a> for phrases or sorting.
+    </p>
+  </div>
 
-{% include 'main/_corpus_selector.html' %}
+  {% include 'main/components/context_bar.html' %}
+  {% include 'main/components/analysis_nav.html' %}
 
-<form method="get" class="mb-3">
+  <div class="stack">
 
-    <input type="text"
-           name="word"
-           class="form-control"
-           placeholder="Enter word (e.g. language, corpus, data)"
-           value="{{ word }}">
+    {% if window_error %}
+      <div class="notice notice--error" role="alert">
+        <span class="notice__icon" aria-hidden="true">!</span>
+        <span>{{ window_error }}</span>
+      </div>
+    {% endif %}
 
-    <div class="form-check mt-2">
-        <input type="checkbox" class="form-check-input" id="corrected" name="corrected" value="1"
-               {% if corrected %}checked{% endif %}>
-        <label class="form-check-label" for="corrected">Show corrected text</label>
-    </div>
+    <form method="get" class="toolbar">
+      {% hidden_params exclude="word,w,page" %}
 
-    <button class="btn btn-primary mt-2">
-        Search
-    </button>
+      <div class="toolbar__field toolbar__field--grow">
+        <label class="field-label" for="index-word">Word form</label>
+        <input type="search" name="word" id="index-word" class="field" value="{{ word }}"
+               placeholder="One whole word, e.g. bahasa" autocomplete="off">
+        <span class="field-hint">Exact word forms only — no partial words or phrases.</span>
+      </div>
 
-</form>
+      <div class="toolbar__field">
+        <label class="field-label" for="index-w">Context words each side</label>
+        <input type="number" name="w" id="index-w" class="field field--inline"
+               value="{{ window }}" min="{{ window_min }}" max="{{ window_max }}" style="width:6.5em;">
+      </div>
 
-{% if results %}
+      <div class="toolbar__actions">
+        <span class="working" role="status">Working…</span>
+        <button type="submit" class="btn btn--primary">Look up</button>
+        {% if word %}
+          <a class="btn btn--quiet" href="{% qs word='' page='' %}" data-loading>Clear</a>
+        {% endif %}
+      </div>
+    </form>
 
-<table class="table table-sm table-bordered">
+    {% if word %}
 
-    <thead>
-        <tr>
-            <th>Context</th>
-            <th>Document</th>
-        </tr>
-    </thead>
+      <div class="stats">
+        <div class="stats__item">
+          <div class="stats__label">Occurrences</div>
+          <div class="stats__value">{{ result_count|intcomma }}</div>
+          <div class="stats__note">of “{{ word }}”</div>
+        </div>
+        <div class="stats__item">
+          <div class="stats__label">Files indexed</div>
+          <div class="stats__value">{{ document_count }}</div>
+          <div class="stats__note">{{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }}</div>
+        </div>
+        <div class="stats__item">
+          <div class="stats__label">Text mode</div>
+          <div class="stats__value" style="font-size:16px;">{{ corrected|yesno:"Corrected,Original" }}</div>
+          <div class="stats__note">{{ selection_token_total|intcomma }} tokens</div>
+        </div>
+      </div>
 
-    <tbody>
+      <div class="row row--between">
+        <form method="get" class="row" style="gap:6px; align-items:center;">
+          {% hidden_params exclude="per_page,page" %}
+          <label class="field-label" for="per-page" style="margin:0;">Lines per page</label>
+          <select name="per_page" id="per-page" class="field field--inline" data-autosubmit>
+            {% for choice in per_page_choices %}
+              <option value="{{ choice }}" {% if per_page == choice %}selected{% endif %}>{{ choice }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button type="submit" class="btn btn--sm">Set</button></noscript>
+        </form>
 
-    {% for item in results %}
-        <tr>
+        {% if result_count %}
+          <a class="btn" href="{% url 'kwic_search_export_csv' %}{% qs page='' %}" download>
+            Export {{ result_count|intcomma }} line{{ result_count|pluralize }} as CSV
+          </a>
+        {% endif %}
+      </div>
 
-            <td class="font-monospace">
-                {% for w in item.context %}
-                    {% if w|slice:":1" == "[" %}
-                        <span class="kwic-keyword">
-                            {{ w|slice:"1:-1" }}
-                        </span>
-                    {% else %}
-                        {{ w }}
-                    {% endif %}
-                {% endfor %}
-            </td>
+      {% if result_count %}
+        {% include 'main/components/concordance_results.html' with rows=results %}
+      {% else %}
+        {% include 'main/components/state.html' with title='That word form is not indexed' body='It does not occur in the selected corpora in this text mode. The index is built when a file is uploaded; if a file’s text was edited afterwards, an administrator may need to rebuild it.' %}
+      {% endif %}
 
-            <td>{{ item.document }}</td>
+    {% else %}
+      {% include 'main/components/state.html' with title='Enter a word form' body='Look up a single word to see every occurrence in context across the selected corpora.' %}
+    {% endif %}
 
-        </tr>
-    {% endfor %}
-
-    </tbody>
-
-</table>
-
-{% endif %}
-
-<a href="{% url 'analysis_home' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Analysis
-</a>
-
+  </div>
+</div>
 {% endblock %}

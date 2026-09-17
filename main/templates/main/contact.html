@@ -1,38 +1,52 @@
 {% extends 'main/base.html' %}
+
 {% block title %}Contact{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
+
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-6">
+<div class="stack-lg">
 
-    <h2 class="mb-4">Contact Us</h2>
-
-    {% if success %}
-      <div class="alert alert-success">
-        Your message has been sent successfully!
-      </div>
-    {% endif %}
-
-    <form method="post">
-      {% csrf_token %}
-
-      <div class="mb-3">
-        <label class="form-label">Name</label>
-        {{ form.name }}
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Email</label>
-        {{ form.email }}
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Message</label>
-        {{ form.message }}
-      </div>
-
-      <button class="btn btn-primary w-100">Send Message</button>
-    </form>
-
+  <div class="page-head">
+    <h1>Contact</h1>
+    <p>Questions about the corpus, access, or a problem with a result.</p>
   </div>
+
+  {% if success %}
+    <div class="notice notice--success" role="status">
+      <span class="notice__icon" aria-hidden="true">&check;</span>
+      <span>Your message has been sent.</span>
+    </div>
+  {% endif %}
+
+  <form method="post" class="stack">
+    {% csrf_token %}
+
+    <div class="panel">
+      <div class="panel__body stack">
+        <div class="field-group">
+          <label class="field-label" for="{{ form.name.id_for_label }}">Name</label>
+          {{ form.name }}
+          {% for error in form.name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.email.id_for_label }}">Email</label>
+          {{ form.email }}
+          {% for error in form.email.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.message.id_for_label }}">Message</label>
+          {{ form.message }}
+          {% for error in form.message.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn btn--primary">Send message</button>
+    </div>
+  </form>
+
 </div>
 {% endblock %}

@@ -1,0 +1,10 @@
+{% comment %} Feature tabs. The five analyses all read the same selection, so they are
+   siblings, not separate destinations you have to back out to reach. {% endcomment %}
+<nav class="subnav" aria-label="Analysis features">
+  <a href="{% url 'analysis_home' %}"  {% if feature == 'home' %}aria-current="page"{% endif %} data-loading>Overview</a>
+  <a href="{% url 'word_frequency' %}" {% if feature == 'word_frequency' %}aria-current="page"{% endif %} data-loading>Word frequency</a>
+  <a href="{% url 'collocations' %}"   {% if feature == 'collocations' %}aria-current="page"{% endif %} data-loading>Collocations</a>
+  <a href="{% url 'ngrams' %}"         {% if feature == 'ngrams' %}aria-current="page"{% endif %} data-loading>N-grams</a>
+  <a href="{% url 'kwic' %}"           {% if feature == 'kwic' %}aria-current="page"{% endif %} data-loading>Concordance</a>
+  <a href="{% url 'kwic_search' %}"    {% if feature == 'kwic_search' %}aria-current="page"{% endif %} data-loading>Word index</a>
+</nav>

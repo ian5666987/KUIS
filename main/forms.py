@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 class RegisterForm(UserCreationForm):
     email = forms.EmailField(
         required=True,
-        widget=forms.EmailInput(attrs={'class': 'form-control'})
+        widget=forms.EmailInput(attrs={'class': 'field'})
     )
 
     class Meta:
@@ -18,18 +18,18 @@ class RegisterForm(UserCreationForm):
         super().__init__(*args, **kwargs)
 
         for field in self.fields.values():
-            field.widget.attrs['class'] = 'form-control'
+            field.widget.attrs['class'] = 'field'
 
 class ContactForm(forms.Form):
     name = forms.CharField(
         max_length=100,
-        widget=forms.TextInput(attrs={'class': 'form-control'})
+        widget=forms.TextInput(attrs={'class': 'field'})
     )
     email = forms.EmailField(
-        widget=forms.EmailInput(attrs={'class': 'form-control'})
+        widget=forms.EmailInput(attrs={'class': 'field'})
     )
     message = forms.CharField(
-        widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 4})
+        widget=forms.Textarea(attrs={'class': 'field', 'rows': 4})
     )
 
 from .models import Corpus, Document
@@ -46,8 +46,8 @@ class CorpusForm(forms.ModelForm):
         fields = ['name', 'description', 'documents']
 
         widgets = {
-            'name': forms.TextInput(attrs={'class': 'form-control'}),
-            'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3}),
+            'name': forms.TextInput(attrs={'class': 'field'}),
+            'description': forms.Textarea(attrs={'class': 'field', 'rows': 3}),
         }
 
     def clean(self):
@@ -72,8 +72,8 @@ class DocumentForm(forms.ModelForm):
         fields = ['title', 'content']
 
         widgets = {
-            'title': forms.TextInput(attrs={'class': 'form-control'}),
-            'content': forms.Textarea(attrs={'class': 'form-control', 'rows': 6}),
+            'title': forms.TextInput(attrs={'class': 'field'}),
+            'content': forms.Textarea(attrs={'class': 'field', 'rows': 6}),
         }
 
     def __init__(self, *args, **kwargs):

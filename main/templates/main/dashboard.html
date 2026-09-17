@@ -1,8 +1,91 @@
 {% extends 'main/base.html' %}
+{% load humanize %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Overview{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
-<p>Welcome, {{ user.username }}! This is a restricted page.</p>
+<div class="stack-lg">
+
+  <div class="page-head">
+    <h1>Overview</h1>
+    <p>Signed in as {{ user.username }}{% if user.is_staff %} · administrator{% endif %}.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stats__item">
+      <div class="stats__label">Corpora</div>
+      <div class="stats__value">{{ corpus_total }}</div>
+    </div>
+    <div class="stats__item">
+      <div class="stats__label">Files</div>
+      <div class="stats__value">{{ document_total }}</div>
+      {% if unassigned_count %}<div class="stats__note">{{ unassigned_count }} in no corpus</div>{% endif %}
+    </div>
+    <div class="stats__item">
+      <div class="stats__label">Tokens</div>
+      <div class="stats__value">{{ token_total|intcomma }}</div>
+      <div class="stats__note">original text</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel__head">
+      <h2>Your current analysis selection</h2>
+    </div>
+    <div class="panel__body">
+      {% if selected_corpus_count %}
+        <p class="mt-0">
+          <strong>{{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }}</strong>
+          · {{ selected_document_count }} file{{ selected_document_count|pluralize }}:
+          {% for corpus in selected_corpora %}<a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </p>
+        <p class="text-sm text-muted">Every analysis feature reads this selection until you change it.</p>
+      {% else %}
+        <p class="mt-0">No corpora selected yet. Analysis features stay locked until you pick at least one.</p>
+      {% endif %}
+    </div>
+    <div class="panel__foot">
+      <a class="btn btn--primary" href="{% url 'analysis_home' %}" data-loading>
+        {% if selected_corpus_count %}Continue to analysis{% else %}Select corpora{% endif %}
+      </a>
+      <a class="btn" href="{% url 'corpus_dashboard' %}">Browse corpora</a>
+      {% if user.is_staff %}
+        <a class="btn" href="{% url 'corpus_create' %}">New corpus</a>
+        <a class="btn" href="{% url 'upload_document' %}">Upload file</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if corpora %}
+    <div class="panel">
+      <div class="panel__head"><h2>Corpora</h2></div>
+      <div class="table-wrap" style="border:0;">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col">Corpus</th>
+              <th scope="col" class="num">Files</th>
+              <th scope="col" class="num">Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for corpus in corpora %}
+              <tr>
+                <th scope="row" style="font-weight:500;"><a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a></th>
+                <td class="num">{{ corpus.document_count }}</td>
+                <td class="num">{{ corpus.token_total|default:0|intcomma }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if corpus_total > 6 %}
+        <div class="panel__foot">
+          <a href="{% url 'corpus_dashboard' %}">See all {{ corpus_total }} corpora</a>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+</div>
 {% endblock %}
