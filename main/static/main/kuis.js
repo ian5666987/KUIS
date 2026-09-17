@@ -124,9 +124,11 @@
     window.addEventListener('resize', measureContext);
   }
 
-  /* --- Corpus picker: search, bulk select, live count -------------------- */
-  var picker = document.querySelector('[data-picker]');
-  if (picker) {
+  /* --- Pickers: search, bulk select, live count --------------------------
+     One behaviour, several instances: the analysis corpus picker and each
+     column of the assign dialog are all [data-picker]. Anything that changes
+     boxes programmatically fires 'kuis:picker-refresh' so the count keeps up. */
+  function initPicker(picker) {
     var rows = Array.prototype.slice.call(picker.querySelectorAll('[data-picker-row]'));
     var boxes = rows.map(function (r) { return r.querySelector('input[type="checkbox"]'); });
     var search = picker.querySelector('[data-picker-search]');
@@ -149,6 +151,8 @@
       if (e.target.matches('input[type="checkbox"]')) update();
     });
 
+    picker.addEventListener('kuis:picker-refresh', update);
+
     picker.querySelectorAll('[data-picker-all]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var want = btn.getAttribute('data-picker-all') === 'select';
@@ -156,6 +160,7 @@
           if (!row.hidden) boxes[i].checked = want;   // bulk actions respect the filter
         });
         update();
+        picker.dispatchEvent(new CustomEvent('kuis:picker-change', { bubbles: true }));
       });
     });
 
@@ -174,5 +179,116 @@
     }
 
     update();
+  }
+
+  document.querySelectorAll('[data-picker]').forEach(initPicker);
+
+  /* --- Assign dialog (files -> corpora) ----------------------------------
+     Progressive enhancement: the triggers stay hidden and the plain links do
+     the work unless <dialog> is actually usable here. */
+  var assign = document.querySelector('[data-assign]');
+
+  if (assign && typeof assign.showModal === 'function') {
+    var docPane = assign.querySelector('[data-assign-pane="documents"]');
+    var corpusPane = assign.querySelector('[data-assign-pane="corpora"]');
+    var submit = assign.querySelector('[data-assign-submit]');
+    var summary = assign.querySelector('[data-assign-summary]');
+    var lastTrigger = null;
+
+    function checkedIn(pane) {
+      return pane
+        ? Array.prototype.slice.call(pane.querySelectorAll('input[type="checkbox"]:checked'))
+        : [];
+    }
+
+    function refreshPane(pane) {
+      if (pane) pane.dispatchEvent(new CustomEvent('kuis:picker-refresh'));
+    }
+
+    function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+    function updateSummary() {
+      var files = checkedIn(docPane).length;
+      var corpora = checkedIn(corpusPane).length;
+      var ready = files > 0 && corpora > 0;
+
+      if (submit) submit.disabled = !ready;
+      if (!summary) return;
+
+      summary.textContent = ready
+        ? 'Adding ' + plural(files, 'file', 'files') + ' to ' + plural(corpora, 'corpus', 'corpora') + '.'
+        : 'Pick at least one file and one corpus.';
+    }
+
+    function setAll(pane, predicate) {
+      if (!pane) return;
+      pane.querySelectorAll('[data-picker-row]').forEach(function (row) {
+        var box = row.querySelector('input[type="checkbox"]');
+        if (box) box.checked = predicate(row);
+      });
+      refreshPane(pane);
+    }
+
+    // Selecting the unassigned files is the common case, so it gets its own
+    // control — and clears any filter that would hide what it just ticked.
+    var unassignedBtn = assign.querySelector('[data-assign-unassigned]');
+    if (unassignedBtn) {
+      unassignedBtn.addEventListener('click', function () {
+        var search = docPane.querySelector('[data-picker-search]');
+        if (search && search.value) {
+          search.value = '';
+          search.dispatchEvent(new Event('input'));
+        }
+        setAll(docPane, function (row) { return row.hasAttribute('data-unassigned'); });
+        updateSummary();
+      });
+    }
+
+    assign.addEventListener('change', updateSummary);
+    assign.addEventListener('kuis:picker-change', updateSummary);
+
+    assign.querySelectorAll('[data-assign-close]').forEach(function (btn) {
+      btn.addEventListener('click', function () { assign.close(); });
+    });
+
+    // Clicking the backdrop: the dialog itself is the only element that can be
+    // the target of a click outside the form.
+    assign.addEventListener('click', function (e) {
+      if (e.target === assign) assign.close();
+    });
+
+    assign.addEventListener('close', function () {
+      if (lastTrigger && document.contains(lastTrigger)) lastTrigger.focus();
+    });
+
+    document.querySelectorAll('[data-assign-open]').forEach(function (trigger) {
+      trigger.hidden = false;
+
+      trigger.addEventListener('click', function () {
+        lastTrigger = trigger;
+
+        // Every opening starts from a clean slate, then applies whatever the
+        // trigger asked to preselect.
+        setAll(docPane, function () { return false; });
+        setAll(corpusPane, function () { return false; });
+
+        if (trigger.getAttribute('data-assign-preselect') === 'unassigned') {
+          setAll(docPane, function (row) { return row.hasAttribute('data-unassigned'); });
+        }
+
+        updateSummary();
+        assign.showModal();
+
+        var search = docPane && docPane.querySelector('[data-picker-search]');
+        if (search) search.focus();
+      });
+    });
+
+    // The plain links only exist for the no-dialog path.
+    document.querySelectorAll('[data-assign-fallback]').forEach(function (link) {
+      link.hidden = true;
+    });
+
+    updateSummary();
   }
 })();

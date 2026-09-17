@@ -19,6 +19,8 @@ urlpatterns = [
     # Corpus management (creating/editing is admin-only)
     path('corpus/', views.corpus_dashboard, name='corpus_dashboard'),
     path('corpus/create/', views.corpus_create, name='corpus_create'),
+    # Bulk membership from the assign dialog: many files -> many corpora
+    path('corpus/assign/', views.corpus_assign, name='corpus_assign'),
     path('corpus/<int:corpus_id>/', views.corpus_detail, name='corpus_detail'),
     path('corpus/<int:corpus_id>/edit/', views.corpus_edit, name='corpus_edit'),
     path('corpus/<int:corpus_id>/delete/', views.corpus_delete, name='corpus_delete'),

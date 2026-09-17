@@ -12,6 +12,7 @@
       <div class="row">
         <a href="{% url 'analysis_home' %}" class="btn btn--primary" data-loading>Go to analysis</a>
         {% if user.is_staff %}
+          <button type="button" class="btn" data-assign-open hidden>Add files to corpora</button>
           <a href="{% url 'corpus_create' %}" class="btn">New corpus</a>
           <a href="{% url 'upload_document' %}" class="btn">Upload file</a>
         {% endif %}
@@ -22,17 +23,6 @@
       analysis over overlapping corpora still counts each file once.
     </p>
   </div>
-
-  {% if unassigned_count and user.is_staff %}
-    <div class="notice notice--warning">
-      <span class="notice__icon" aria-hidden="true">!</span>
-      <span>
-        <strong>{{ unassigned_count }} file{{ unassigned_count|pluralize }} belong to no corpus</strong>
-        and are therefore excluded from every analysis. Add them to a corpus to include them.
-        They are listed at the bottom of this page.
-      </span>
-    </div>
-  {% endif %}
 
   <form method="get" class="toolbar" role="search">
     <div class="toolbar__field toolbar__field--grow">
@@ -66,7 +56,7 @@
         <tbody>
           {% for corpus in corpora %}
             <tr>
-              <th scope="row" style="font-weight:600;">
+              <th scope="row" class="data__subject">
                 <a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a>
                 {% if corpus.id in selected_corpus_ids %}
                   <span class="badge badge--accent" title="Included in your current analysis selection">Selected</span>
@@ -102,36 +92,31 @@
   {% endif %}
 
   {% if user.is_staff and unassigned_count %}
-    <div class="panel">
-      <div class="panel__head">
-        <h2>Files in no corpus</h2>
-        <span class="badge">{{ unassigned_count }}</span>
+    <details class="aside">
+      <summary>
+        {{ unassigned_count }} uploaded file{{ unassigned_count|pluralize }}
+        belong{{ unassigned_count|pluralize:"s," }} to no corpus, so
+        {{ unassigned_count|pluralize:"it is,they are" }} excluded from every analysis
+      </summary>
+      <div class="aside__body">
+        <ul class="aside__list">
+          {% for doc in unassigned %}
+            <li>{{ doc.title }} <span class="num">{{ doc.token_count|intcomma }} tokens</span></li>
+          {% endfor %}
+        </ul>
+        {% comment %} With JS the button opens the assign dialog with these files already
+           ticked; without it, the link still reaches a form that can group them. {% endcomment %}
+        <button type="button" class="btn btn--sm" data-assign-open data-assign-preselect="unassigned" hidden>
+          Add {{ unassigned_count|pluralize:"it,them" }} to a corpus
+        </button>
+        <a href="{% url 'corpus_create' %}" data-assign-fallback>Add {{ unassigned_count|pluralize:"it,them" }} to a corpus</a>
+        to make {{ unassigned_count|pluralize:"it,them" }} analysable.
       </div>
-      <div class="table-wrap" style="border:0;">
-        <table class="data">
-          <thead>
-            <tr>
-              <th scope="col">File</th>
-              <th scope="col" class="num">Tokens</th>
-              <th scope="col">Uploaded</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for doc in unassigned %}
-              <tr>
-                <td>{{ doc.title }}</td>
-                <td class="num">{{ doc.token_count|intcomma }}</td>
-                <td class="text-sm text-muted">{{ doc.uploaded_at|date:"j M Y" }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <div class="panel__foot">
-        <span class="text-sm text-muted">Add these to a corpus to make them analysable.</span>
-        <a class="btn btn--sm" href="{% url 'corpus_create' %}">New corpus</a>
-      </div>
-    </div>
+    </details>
+  {% endif %}
+
+  {% if user.is_staff %}
+    {% include 'main/components/assign_modal.html' %}
   {% endif %}
 
 </div>

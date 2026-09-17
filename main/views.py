@@ -4,6 +4,8 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from functools import wraps
 from .forms import RegisterForm #this is taking from the same-folder 'forms' file
 
@@ -186,8 +188,65 @@ def corpus_dashboard(request):
         'query': query,
         'unassigned': unassigned,
         'unassigned_count': unassigned.count(),
-        'selected_corpus_ids': _resolve_selected_corpus_ids(request)
+        'selected_corpus_ids': _resolve_selected_corpus_ids(request),
+        # The assign dialog works over everything, not just what the search left
+        # on screen: any selection of files into any selection of corpora.
+        'all_corpora': _annotated_corpora(),
+        'all_documents': Document.objects.prefetch_related('corpora').order_by('-uploaded_at'),
+        'document_total': Document.objects.count()
     })
+
+
+@login_required
+@staff_required
+def corpus_assign(request):
+    """Bulk membership from the assign dialog: any set of files into any set of
+    corpora. Additive on purpose — a file keeps the corpora it already has, so
+    the dialog can never silently drop a grouping someone else curated."""
+    redirect_to = request.POST.get('next', '')
+
+    if not url_has_allowed_host_and_scheme(
+        redirect_to,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure()
+    ):
+        redirect_to = reverse('corpus_dashboard')
+
+    if request.method != 'POST':
+        return redirect(redirect_to)
+
+    documents = list(Document.objects.filter(id__in=request.POST.getlist('documents')))
+    corpora = list(Corpus.objects.filter(id__in=request.POST.getlist('corpora')))
+
+    if not documents or not corpora:
+        messages.error(request, 'Pick at least one file and at least one corpus.')
+        return redirect(redirect_to)
+
+    added = 0
+    for corpus in corpora:
+        already = set(corpus.documents.values_list('id', flat=True))
+        new_documents = [doc for doc in documents if doc.id not in already]
+
+        if new_documents:
+            corpus.documents.add(*new_documents)
+            added += len(new_documents)
+
+    file_word = 'file' if len(documents) == 1 else 'files'
+    corpus_word = 'corpus' if len(corpora) == 1 else 'corpora'
+
+    if added:
+        messages.success(
+            request,
+            f'Added {len(documents)} {file_word} to {len(corpora)} {corpus_word}.'
+        )
+    else:
+        messages.info(
+            request,
+            f'Nothing changed — {"that file" if len(documents) == 1 else "those files"} '
+            f'already belonged to every corpus you picked.'
+        )
+
+    return redirect(redirect_to)
 
 
 def _document_from_upload(uploaded_file, user, title=None):

@@ -1,0 +1,137 @@
+{% comment %} Assign dialog: any selection of files into any selection of corpora.
+
+   Two independent multi-selectors side by side — each is an ordinary
+   [data-picker], so search, bulk select and the live count come from the same
+   code as the analysis picker. The submit is additive: files keep whatever
+   corpora they already belong to.
+
+   Without JavaScript the <dialog> never opens, so every trigger is rendered
+   next to a plain link fallback that JS hides. {% endcomment %}
+
+{% load humanize %}
+
+<dialog class="modal" id="assign-modal" data-assign aria-labelledby="assign-modal-title">
+  <form method="post" action="{% url 'corpus_assign' %}" class="modal__form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+
+    <div class="modal__head">
+      <div>
+        <h2 id="assign-modal-title">Add files to corpora</h2>
+        <p class="text-sm text-muted" style="margin:2px 0 0;">
+          Pick any files on the left and any corpora on the right. Every file picked
+          is added to every corpus picked; existing memberships are kept.
+        </p>
+      </div>
+      <button type="button" class="btn btn--sm" data-assign-close aria-label="Close dialog">Close</button>
+    </div>
+
+    <div class="modal__body">
+      <div class="dual">
+
+        <section class="dual__col" data-picker data-assign-pane="documents">
+          <div class="dual__head">
+            <h3>Files<span class="picker__count" data-picker-count aria-live="polite">0 of {{ document_total }} selected</span></h3>
+          </div>
+
+          {% if all_documents %}
+            <div class="picker__tools">
+              <div class="picker__search">
+                <label class="visually-hidden" for="assign-doc-search">Filter files by name</label>
+                <input type="search" id="assign-doc-search" class="field" data-picker-search
+                       placeholder="Filter files" autocomplete="off">
+              </div>
+              <button type="button" class="btn btn--sm" data-picker-all="select">All</button>
+              <button type="button" class="btn btn--sm" data-picker-all="clear">None</button>
+              <button type="button" class="btn btn--sm" data-assign-unassigned>Only in no corpus</button>
+            </div>
+
+            <div class="picker__list">
+              {% for doc in all_documents %}
+                <label class="picker__row" data-picker-row
+                       {% if not doc.corpora.all %}data-unassigned="true"{% endif %}
+                       data-search="{{ doc.title|lower }}{% for c in doc.corpora.all %} {{ c.name|lower }}{% endfor %}">
+                  <input type="checkbox" name="documents" value="{{ doc.id }}">
+
+                  <span class="picker__name" style="font-weight:500;">{{ doc.title }}</span>
+
+                  <span class="picker__stats">{{ doc.token_count|intcomma }} tokens</span>
+
+                  <span class="picker__desc">
+                    {% for c in doc.corpora.all %}
+                      <span class="badge badge--muted">{{ c.name }}</span>
+                    {% empty %}
+                      <span class="badge badge--warn">In no corpus</span>
+                    {% endfor %}
+                  </span>
+                </label>
+              {% endfor %}
+
+              <p class="picker__empty" data-picker-none hidden>No file matches that filter.</p>
+            </div>
+          {% else %}
+            <div class="picker__list">
+              <p class="picker__empty">
+                No files uploaded yet. <a href="{% url 'upload_document' %}">Upload one</a> first.
+              </p>
+            </div>
+          {% endif %}
+        </section>
+
+        <section class="dual__col" data-picker data-assign-pane="corpora">
+          <div class="dual__head">
+            <h3>Corpora<span class="picker__count" data-picker-count aria-live="polite">0 of {{ corpus_total }} selected</span></h3>
+          </div>
+
+          {% if all_corpora %}
+            <div class="picker__tools">
+              <div class="picker__search">
+                <label class="visually-hidden" for="assign-corpus-search">Filter corpora by name</label>
+                <input type="search" id="assign-corpus-search" class="field" data-picker-search
+                       placeholder="Filter corpora" autocomplete="off">
+              </div>
+              <button type="button" class="btn btn--sm" data-picker-all="select">All</button>
+              <button type="button" class="btn btn--sm" data-picker-all="clear">None</button>
+            </div>
+
+            <div class="picker__list">
+              {% for corpus in all_corpora %}
+                <label class="picker__row" data-picker-row
+                       data-search="{{ corpus.name|lower }} {{ corpus.description|lower }}">
+                  <input type="checkbox" name="corpora" value="{{ corpus.id }}">
+
+                  <span class="picker__name">{{ corpus.name }}</span>
+
+                  <span class="picker__stats">
+                    {{ corpus.document_count }} file{{ corpus.document_count|pluralize }}
+                  </span>
+
+                  {% if corpus.description %}
+                    <span class="picker__desc">{{ corpus.description }}</span>
+                  {% endif %}
+                </label>
+              {% endfor %}
+
+              <p class="picker__empty" data-picker-none hidden>No corpus matches that filter.</p>
+            </div>
+          {% else %}
+            <div class="picker__list">
+              <p class="picker__empty">
+                No corpora exist yet. <a href="{% url 'corpus_create' %}">Create the first one</a>.
+              </p>
+            </div>
+          {% endif %}
+        </section>
+
+      </div>
+    </div>
+
+    <div class="modal__foot">
+      <button type="submit" class="btn btn--primary" data-assign-submit disabled>Add to corpora</button>
+      <button type="button" class="btn" data-assign-close>Cancel</button>
+      <span class="text-sm text-muted" data-assign-summary aria-live="polite">
+        Pick at least one file and one corpus.
+      </span>
+    </div>
+  </form>
+</dialog>
