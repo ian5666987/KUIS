@@ -5,6 +5,6 @@
   <a href="{% url 'word_frequency' %}" {% if feature == 'word_frequency' %}aria-current="page"{% endif %} data-loading>Word frequency</a>
   <a href="{% url 'collocations' %}"   {% if feature == 'collocations' %}aria-current="page"{% endif %} data-loading>Collocations</a>
   <a href="{% url 'ngrams' %}"         {% if feature == 'ngrams' %}aria-current="page"{% endif %} data-loading>N-grams</a>
-  <a href="{% url 'kwic' %}"           {% if feature == 'kwic' %}aria-current="page"{% endif %} data-loading>Concordance</a>
-  <a href="{% url 'kwic_search' %}"    {% if feature == 'kwic_search' %}aria-current="page"{% endif %} data-loading>Word index</a>
+  <a href="{% url 'kwic' %}"           {% if feature == 'kwic' %}aria-current="page"{% endif %} data-loading>KWIC (Legacy)</a>
+  <a href="{% url 'kwic_search' %}"    {% if feature == 'kwic_search' %}aria-current="page"{% endif %} data-loading>KWIC (Fast)</a>
 </nav>
