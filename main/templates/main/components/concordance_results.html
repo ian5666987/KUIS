@@ -1,22 +1,32 @@
 {% comment %} Shared concordance table for both KWIC engines. The node is centred and the
-   two contexts read outward from it, which is what makes a concordance
-   scannable; the sorted side is set in full-strength ink so the eye knows
-   which column carries the ordering. {% endcomment %}
+   two contexts read outward from it — left context right-aligned, right context
+   left-aligned — which is what makes a concordance scannable; the sorted side is
+   set in full-strength ink so the eye knows which column carries the ordering.
+
+   The two context columns are equal widths and the node column sits between
+   them, so the node is the same distance from each context on every row
+   whatever the term is — a phrase wraps inside its column rather than spilling
+   over the contexts.
+
+   A context that does not fit its column is clipped rather than wrapped, so the
+   node column stays on one axis. JavaScript marks those cells clickable and
+   opens the full line in a dialog; with JS off nothing is lost but the detour.
+{% endcomment %}
 
 {% load humanize %}
 
 {% if rows %}
   <div class="table-wrap" style="margin-top:14px;">
-    <table class="data kwic data--fixed">
+    <table class="data kwic data--fixed" data-kwic-table>
       <caption class="visually-hidden">
         Concordance lines, {{ corrected|yesno:"corrected,original" }} text
       </caption>
       <thead>
         <tr>
           <th scope="col" style="width:16%;">File</th>
-          <th scope="col" class="kwic__left" style="width:34%;">Left context</th>
-          <th scope="col" style="width:16%; text-align:center;">Node</th>
-          <th scope="col" style="width:34%;">Right context</th>
+          <th scope="col" class="kwic__left" style="width:32%;">Left context</th>
+          <th scope="col" class="kwic__node" style="width:20%;">Node</th>
+          <th scope="col" style="width:32%;">Right context</th>
         </tr>
       </thead>
       <tbody>
@@ -27,12 +37,13 @@
             <td class="kwic__node">
               {% for word in line.keyword %}<mark>{{ word }}</mark>{% if not forloop.last %} {% endif %}{% endfor %}
             </td>
-            <td class="kwic__right {% if sort == 'right' %}is-sorted{% endif %}">{{ line.right|join:" " }}</td>
+            <td class="kwic__right {% if sort == 'right' %}is-sorted{% endif %}"><span>{{ line.right|join:" " }}</span></td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 
+  {% include 'main/components/concordance_modal.html' %}
   {% include 'main/components/pagination.html' with unit='lines' %}
 {% endif %}

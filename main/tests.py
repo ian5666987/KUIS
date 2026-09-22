@@ -198,7 +198,7 @@ class ConcordanceTests(ExplorerTestCase):
     def test_out_of_range_window_is_clamped_and_explained(self):
         response = self.client.get(reverse('kwic'), {'q': 'nasi', 'w': '99'})
 
-        self.assertEqual(response.context['window'], 15)
+        self.assertEqual(response.context['window'], 10)
         self.assertIsNotNone(response.context['window_error'])
         self.assertContains(response, 'Context size must be between')
 

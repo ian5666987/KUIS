@@ -40,7 +40,9 @@
       <div class="toolbar__field">
         <label class="field-label" for="index-w">Context words each side</label>
         <input type="number" name="w" id="index-w" class="field field--inline"
-               value="{{ window }}" min="{{ window_min }}" max="{{ window_max }}" style="width:6.5em;">
+               value="{{ window }}" min="{{ window_min }}" max="{{ window_max }}" step="1"
+               style="width:6.5em;" aria-describedby="index-w-hint">
+        <!-- <span class="field-hint" id="index-w-hint">{{ window_min }}–{{ window_max }} words.</span> -->
       </div>
 
       <div class="toolbar__actions">

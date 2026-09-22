@@ -1,0 +1,24 @@
+{% comment %} The full concordance line for one row, for when a context is too long to
+   fit its column. Opened by JavaScript from [data-kwic-table]; the table cells
+   already hold the complete text, so nothing here is filled in server-side.
+   One dialog per page, reused by every row. {% endcomment %}
+
+<dialog class="modal modal--narrow" data-kwic-context aria-labelledby="kwic-context-title">
+  <div class="modal__form">
+
+    <div class="modal__head">
+      <div>
+        <h2 id="kwic-context-title">Full context</h2>
+        <p class="text-sm text-muted" style="margin:2px 0 0;" data-kwic-context-doc></p>
+      </div>
+      <button type="button" class="btn btn--sm" data-kwic-context-close aria-label="Close dialog">Close</button>
+    </div>
+
+    <div class="modal__body">
+      <p class="kwic-full">
+        <span data-kwic-context-left></span><mark data-kwic-context-node></mark><span data-kwic-context-right></span>
+      </p>
+    </div>
+
+  </div>
+</dialog>

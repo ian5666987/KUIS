@@ -790,8 +790,8 @@ def upload_document(request):
 
 # --- Concordance -----------------------------------------------------------
 
-KWIC_WINDOW_MIN = 1
-KWIC_WINDOW_MAX = 15
+KWIC_WINDOW_MIN = 2
+KWIC_WINDOW_MAX = 10
 KWIC_WINDOW_DEFAULT = 5
 
 

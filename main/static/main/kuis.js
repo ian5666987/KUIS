@@ -311,4 +311,122 @@
 
     updateSummary();
   }
+
+  /* --- Concordance: full context dialog -----------------------------------
+     A concordance is only readable if every node sits on the same axis, so a
+     long context is clipped rather than wrapped. Nothing is lost server-side:
+     the cell already holds the whole string, so opening it is a read of the
+     DOM. Only the cells that are actually clipped become clickable — an
+     affordance on a line that is already complete would be a lie. */
+  var kwicTable = document.querySelector('[data-kwic-table]');
+  var kwicDialog = document.querySelector('[data-kwic-context]');
+
+  if (kwicTable && kwicDialog && typeof kwicDialog.showModal === 'function') {
+    var ctxDoc = kwicDialog.querySelector('[data-kwic-context-doc]');
+    var ctxLeft = kwicDialog.querySelector('[data-kwic-context-left]');
+    var ctxNode = kwicDialog.querySelector('[data-kwic-context-node]');
+    var ctxRight = kwicDialog.querySelector('[data-kwic-context-right]');
+    var kwicTrigger = null;
+
+    var contextCells = Array.prototype.slice.call(
+      kwicTable.querySelectorAll('td.kwic__left, td.kwic__right')
+    );
+
+    function textOf(cell) {
+      return cell ? cell.textContent.trim() : '';
+    }
+
+    // Is the text wider than the room the column gives it? scrollWidth answers
+    // that for an ordinary block, but a <td> is not a scroll container in every
+    // engine and can report no overflow at all while visibly showing an
+    // ellipsis — so fall back to measuring the inner span, whose layout width
+    // is the full untruncated text regardless of what the cell paints.
+    function isClipped(cell) {
+      if (cell.scrollWidth - cell.clientWidth > 1) return true;
+
+      var text = cell.firstElementChild;
+      if (!text) return false;
+
+      var style = window.getComputedStyle(cell);
+      var room = cell.clientWidth
+        - (parseFloat(style.paddingLeft) || 0)
+        - (parseFloat(style.paddingRight) || 0);
+
+      return text.getBoundingClientRect().width - room > 1;
+    }
+
+    function markClipped() {
+      contextCells.forEach(function (cell) {
+        var clipped = isClipped(cell);
+
+        cell.classList.toggle('is-clipped', clipped);
+
+        if (clipped) {
+          cell.setAttribute('tabindex', '0');
+          cell.setAttribute('role', 'button');
+          cell.setAttribute('title', 'Show the full line');
+        } else {
+          cell.removeAttribute('tabindex');
+          cell.removeAttribute('role');
+          cell.removeAttribute('title');
+        }
+      });
+    }
+
+    markClipped();
+
+    // Web fonts land after the first measure and change the metrics.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(markClipped);
+
+    // Column widths are percentages, so a resize changes what fits.
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(markClipped, 150);
+    });
+
+    function openContext(cell) {
+      var row = cell.closest('tr');
+      if (!row) return;
+
+      var left = textOf(row.querySelector('.kwic__left'));
+      var right = textOf(row.querySelector('.kwic__right'));
+
+      if (ctxDoc) ctxDoc.textContent = textOf(row.querySelector('.kwic__doc'));
+      if (ctxLeft) ctxLeft.textContent = left ? left + ' ' : '';
+      if (ctxNode) ctxNode.textContent = textOf(row.querySelector('.kwic__node'));
+      if (ctxRight) ctxRight.textContent = right ? ' ' + right : '';
+
+      kwicTrigger = cell;
+      kwicDialog.showModal();
+    }
+
+    kwicTable.addEventListener('click', function (e) {
+      var cell = e.target.closest('td.is-clipped');
+      if (cell && kwicTable.contains(cell)) openContext(cell);
+    });
+
+    // A cell is not a button, so it does not get Enter/Space for free.
+    kwicTable.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+
+      var cell = e.target.closest('td.is-clipped');
+      if (!cell || !kwicTable.contains(cell)) return;
+
+      e.preventDefault();
+      openContext(cell);
+    });
+
+    kwicDialog.querySelectorAll('[data-kwic-context-close]').forEach(function (btn) {
+      btn.addEventListener('click', function () { kwicDialog.close(); });
+    });
+
+    kwicDialog.addEventListener('click', function (e) {
+      if (e.target === kwicDialog) kwicDialog.close();
+    });
+
+    kwicDialog.addEventListener('close', function () {
+      if (kwicTrigger && document.contains(kwicTrigger)) kwicTrigger.focus();
+    });
+  }
 })();

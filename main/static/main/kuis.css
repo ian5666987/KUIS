@@ -484,20 +484,75 @@ th[aria-sort] .sort-link__arrow { color: var(--accent); }
 
 .kwic { font-family: var(--mono); font-size: 13px; }
 .kwic td { white-space: nowrap; }
-.kwic__left  { text-align: right; direction: rtl; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
-.kwic__left > span { direction: ltr; unicode-bidi: embed; }
-.kwic__right { text-align: left; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
-.kwic__node  { text-align: center; white-space: nowrap; }
-.kwic__node mark {
+
+/* Every alignment below has to be qualified with the element: the base rule
+   `table.data th, table.data td` sets text-align: left at specificity (0,1,2),
+   which outweighs a bare class and would silently left-align the whole
+   concordance — the one thing a concordance must never be. */
+
+/* The left context reads outward from the node, so it is flush against it and
+   loses words off its far edge: direction: rtl puts both the alignment and the
+   ellipsis on the correct side, and the inner span keeps the words themselves
+   in reading order. */
+.kwic th.kwic__left { text-align: right; }
+.kwic td.kwic__left {
+  text-align: right; direction: rtl;
+  max-width: 40ch; overflow: hidden; text-overflow: ellipsis;
+}
+.kwic td.kwic__left > span { direction: ltr; unicode-bidi: embed; }
+
+.kwic td.kwic__right {
+  text-align: left;
+  max-width: 40ch; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* The node is the axis of the whole table: the contexts are equal-width
+   columns flush against it on either side, so as long as the node stays
+   *inside* its own column it is the same distance from each of them on every
+   row. nowrap would let a long phrase spill out and overlap the contexts,
+   breaking exactly that — so the node wraps instead. Every row holds the same
+   node, so they all wrap alike and the rows stay level. */
+.kwic th.kwic__node { text-align: center; }
+.kwic td.kwic__node {
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.kwic td.kwic__node mark {
   background: var(--mark); color: var(--ink);
   border-bottom: 2px solid var(--mark-rule);
   padding: 1px 4px; border-radius: 2px; font-weight: 600;
 }
-.kwic__doc { font-family: var(--sans); font-size: 12.5px; color: var(--ink-muted); white-space: nowrap; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+
+.kwic td.kwic__doc { font-family: var(--sans); font-size: 12.5px; color: var(--ink-muted); white-space: nowrap; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
 /* The sorted side is the one the eye should scan first. */
 .kwic td.is-sorted { color: var(--ink); font-weight: 600; }
 .kwic td:not(.is-sorted).kwic__left,
 .kwic td:not(.is-sorted).kwic__right { color: var(--ink-muted); }
+
+/* A clipped context is the only thing worth opening, so only those cells
+   advertise themselves. The cue sits on the text, not the cell, so it cannot
+   be mistaken for the row hover. */
+.kwic td.is-clipped { cursor: pointer; }
+.kwic td.is-clipped > span {
+  text-decoration: underline dotted var(--ink-faint);
+  text-underline-offset: 3px;
+}
+.kwic td.is-clipped:hover > span,
+.kwic td.is-clipped:focus-visible > span { color: var(--ink); text-decoration-color: var(--accent); }
+.kwic td.is-clipped:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The whole line, wrapped, with the node still marked. */
+.modal--narrow { width: min(660px, calc(100vw - 32px)); }
+.kwic-full {
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.8;
+  color: var(--ink-muted); margin: 0;
+}
+.kwic-full mark {
+  background: var(--mark); color: var(--ink);
+  border-bottom: 2px solid var(--mark-rule);
+  padding: 1px 4px; border-radius: 2px; font-weight: 600;
+}
 
 /* --- Stats ribbon -------------------------------------------------------- */
 

@@ -131,6 +131,11 @@ STATIC_URL = 'static/'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'home'
 
+# Credentials used by the `seed` management command to bootstrap the first user.
+SEED_USER = env('SEED_USER', default='')
+SEED_PASSWORD = env('SEED_PASSWORD', default='')
+SEED_USER_TYPE = env('SEED_USER_TYPE', default='user')
+
 # Add constants for contact, this is a test email, not the actual one.
 # The actual email requires to use server/protocol such as Gmail SMTP, Outlook, SendGrid
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
