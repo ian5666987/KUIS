@@ -22,8 +22,8 @@
 | Feature | Access | Description | Key files |
 |---|---|---|---|
 | **Public pages** (Home/About/Contact) | anyone | Static pages; Contact sends mail via `ContactForm` | `main/views.py` (`home`, `about`, `contact`), `main/forms.py` `ContactForm`, `main/templates/main/{home,about,contact}.html` |
-| **Registration** | anyone | Signup via `UserCreationForm` subclass + required email; auto-logs in, redirects to dashboard | `main/views.py` (`register`), `main/forms.py` `RegisterForm`, `main/templates/registration/register.html` |
-| **Login / Logout** | anyone | Custom `LoginView` subclass (Bootstrap-styled); stock `LogoutView` (POST-only, via nav form) | `main/views.py` (`CustomLoginView`), `config/urls.py`, `main/templates/registration/login.html` |
+| **Registration** | anyone | Signup via `UserCreationForm` subclass + required email (rejected if another account already uses it, since the email is a sign-in identifier); auto-logs in, redirects to dashboard | `main/views.py` (`register`), `main/forms.py` `RegisterForm`, `main/templates/registration/register.html` |
+| **Login / Logout** | anyone | Custom `LoginView` subclass (Bootstrap-styled) accepting a username *or* the account's email (case-insensitive) via `UsernameOrEmailBackend`; stock `LogoutView` (POST-only, via nav form) | `main/views.py` (`CustomLoginView`), `main/forms.py` `LoginForm`, `main/auth_backends.py`, `config/urls.py`, `main/templates/registration/login.html` |
 | **Dashboard / Profile** | registered | Minimal authenticated landing pages | `main/views.py` (`dashboard`, `profile`), `main/templates/main/{dashboard,profile}.html` |
 | **Corpus list / detail** | registered | Browse corpora, their files, token counts, and which corpora overlap. Management buttons render only for admins | `main/views.py` (`corpus_dashboard`, `corpus_detail`), `main/templates/main/corpus_{dashboard,detail}.html` |
 | **Create / edit / delete corpus** | **admin** | Name + description, tick existing files, and/or upload new XML files inline. Deleting a corpus keeps its files | `main/views.py` (`corpus_create`, `corpus_edit`, `corpus_delete`), `main/forms.py` `CorpusForm`, `main/templates/main/corpus_{form,confirm_delete}.html` |
@@ -52,7 +52,8 @@ main/
   models.py            — Document, Corpus, Token; build_tokens(); post_save signal
   views.py             — all view functions/classes (see §2)
   urls.py              — app routing, split into /corpus/ and /analysis/ groups
-  forms.py             — RegisterForm, ContactForm, CorpusForm, DocumentForm
+  forms.py             — LoginForm, RegisterForm, ContactForm, CorpusForm, DocumentForm
+  auth_backends.py     — UsernameOrEmailBackend: sign in with a username or email
   admin.py             — registers Document + Corpus
   apps.py              — standard AppConfig, no hooks
   corpus_parsing.py    — XML tokenizer: parse_document() / extract_word_streams()

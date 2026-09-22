@@ -1,8 +1,28 @@
 # This file is added to facility various forms in the application
 
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.models import User
+
+
+class LoginForm(AuthenticationForm):
+    """Sign-in accepts either identifier, so the field is labelled and sized for
+    both: the inherited one caps at the 150-character username limit."""
+
+    error_messages = {
+        **AuthenticationForm.error_messages,
+        'invalid_login': "That username or email and password don't match an account.",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.fields['username'].label = "Username or email"
+        self.fields['username'].max_length = 254
+        self.fields['username'].widget.attrs.update({
+            'maxlength': 254,
+            'autocomplete': 'username',
+        })
 
 class RegisterForm(UserCreationForm):
     email = forms.EmailField(
@@ -19,6 +39,15 @@ class RegisterForm(UserCreationForm):
 
         for field in self.fields.values():
             field.widget.attrs['class'] = 'field'
+
+    def clean_email(self):
+        # Emails are a sign-in identifier, so they have to pick out one account.
+        email = self.cleaned_data['email']
+
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("An account already uses this email address.")
+
+        return email
 
 class ContactForm(forms.Form):
     name = forms.CharField(

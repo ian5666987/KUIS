@@ -127,6 +127,13 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Sign-in accepts a username or the email on the account; the default backend
+# stays in the list so admin-created and superuser accounts keep working.
+AUTHENTICATION_BACKENDS = [
+    'main.auth_backends.UsernameOrEmailBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 # Add constants for login redirects
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'home'

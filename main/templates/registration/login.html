@@ -14,7 +14,7 @@
   {% if form.errors %}
     <div class="notice notice--error" role="alert">
       <span class="notice__icon" aria-hidden="true">!</span>
-      <span>That username and password don’t match an account. Check both and try again.</span>
+      <span>That username or email and password don’t match an account. Check both and try again.</span>
     </div>
   {% endif %}
 
@@ -24,7 +24,7 @@
     <div class="panel">
       <div class="panel__body stack">
         <div class="field-group">
-          <label class="field-label" for="{{ form.username.id_for_label }}">Username</label>
+          <label class="field-label" for="{{ form.username.id_for_label }}">Username or email</label>
           {{ form.username }}
         </div>
         <div class="field-group">

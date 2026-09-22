@@ -244,3 +244,72 @@ class ExportTests(ExplorerTestCase):
         body = response.content.decode()
         self.assertEqual(len(body.strip().splitlines()), 2)   # header + one row
         self.assertIn('nasi', body)
+
+
+class LoginIdentifierTests(TestCase):
+    """Sign-in accepts the username or the email on the account."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.password = 'pw-for-tests-1'
+        cls.user = User.objects.create_user(
+            'researcher', email='Researcher@Example.com', password=cls.password
+        )
+
+    def post_login(self, identifier, password=None):
+        return self.client.post(reverse('login'), {
+            'username': identifier,
+            'password': self.password if password is None else password,
+        })
+
+    def assertLoggedInAs(self, user):
+        session_user = self.client.session.get('_auth_user_id')
+        self.assertEqual(session_user, str(user.pk))
+
+    def test_username_still_works(self):
+        self.post_login('researcher')
+        self.assertLoggedInAs(self.user)
+
+    def test_email_is_accepted(self):
+        self.post_login('Researcher@Example.com')
+        self.assertLoggedInAs(self.user)
+
+    def test_email_match_ignores_case(self):
+        self.post_login('researcher@example.com')
+        self.assertLoggedInAs(self.user)
+
+    def test_wrong_password_is_rejected(self):
+        response = self.post_login('researcher@example.com', password='not-the-password')
+        self.assertIsNone(self.client.session.get('_auth_user_id'))
+        self.assertContains(response, 'don', status_code=200)
+
+    def test_unknown_identifier_is_rejected(self):
+        self.post_login('nobody@example.com')
+        self.assertIsNone(self.client.session.get('_auth_user_id'))
+
+    def test_a_username_beats_someone_elses_email(self):
+        # One account is named after the address another account uses as its email.
+        namesake = User.objects.create_user('shared@example.com', password=self.password)
+        User.objects.create_user('other', email='shared@example.com', password=self.password)
+
+        self.post_login('shared@example.com')
+        self.assertLoggedInAs(namesake)
+
+    def test_an_email_shared_by_two_accounts_is_refused(self):
+        # Legacy rows can still share an address; there is no safe way to pick one.
+        User.objects.filter(pk=self.user.pk).update(email='shared@example.com')
+        User.objects.create_user('duplicate', email='shared@example.com', password=self.password)
+
+        self.post_login('shared@example.com')
+        self.assertIsNone(self.client.session.get('_auth_user_id'))
+
+    def test_registration_rejects_an_email_already_in_use(self):
+        response = self.client.post(reverse('register'), {
+            'username': 'newcomer',
+            'email': 'researcher@example.com',
+            'password1': 'pw-for-tests-1',
+            'password2': 'pw-for-tests-1',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username='newcomer').exists())

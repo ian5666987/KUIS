@@ -7,7 +7,7 @@ from django.core.exceptions import PermissionDenied
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from functools import wraps
-from .forms import RegisterForm #this is taking from the same-folder 'forms' file
+from .forms import LoginForm, RegisterForm #this is taking from the same-folder 'forms' file
 
 #For contact
 from django.core.mail import send_mail 
@@ -15,7 +15,6 @@ from django.conf import settings
 from .forms import ContactForm
 
 #For login and authentication
-from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.views import LoginView
 
 #For corpus functionalities
@@ -129,7 +128,7 @@ Message:
     return render(request, 'main/contact.html', {'form': form})
 
 def custom_login(request):
-    form = AuthenticationForm()
+    form = LoginForm()
 
     # Add form styling classes
     for field in form.fields.values():
@@ -139,7 +138,7 @@ def custom_login(request):
 
 class CustomLoginView(LoginView):
     template_name = 'registration/login.html'
-    authentication_form = AuthenticationForm
+    authentication_form = LoginForm
 
     def get_form(self, form_class=None):
         form = super().get_form(form_class)

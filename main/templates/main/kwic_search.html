@@ -34,7 +34,7 @@
         <label class="field-label" for="index-word">Word form</label>
         <input type="search" name="word" id="index-word" class="field" value="{{ word }}"
                placeholder="One whole word, e.g. bahasa" autocomplete="off">
-        <span class="field-hint">Exact word forms only — no partial words or phrases.</span>
+        <!-- <span class="field-hint">Exact word forms only — no partial words or phrases.</span> -->
       </div>
 
       <div class="toolbar__field">
@@ -56,7 +56,7 @@
 
     {% if word %}
 
-      <div class="stats">
+      <!-- <div class="stats">
         <div class="stats__item">
           <div class="stats__label">Occurrences</div>
           <div class="stats__value">{{ result_count|intcomma }}</div>
@@ -72,7 +72,7 @@
           <div class="stats__value" style="font-size:16px;">{{ corrected|yesno:"Corrected,Original" }}</div>
           <div class="stats__note">{{ selection_token_total|intcomma }} tokens</div>
         </div>
-      </div>
+      </div> -->
 
       <div class="row row--between">
         <form method="get" class="row" style="gap:6px; align-items:center;">
