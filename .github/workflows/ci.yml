@@ -12,6 +12,7 @@ jobs:
       DB_ENGINE: django.db.backends.sqlite3
       DB_NAME: ":memory:"
       SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,10 +22,22 @@ jobs:
       - run: pip install -r requirements.txt
       # docs/ONBOARDING.md §6: Django's test client adds 'testserver' to
       # ALLOWED_HOSTS automatically, no override needed here.
+      # main/tests.py::JWTAuthTests covers the /api/auth/token/* endpoints
+      # (architecture plan §3) — obtain, refresh rotation + blacklist reuse
+      # rejection, and confirms session-cookie login stays unaffected.
       - run: python manage.py test main
 
-  dataplane-import-check:
+  dataplane-tests:
     runs-on: ubuntu-latest
+    env:
+      # Only test_jwt_consistency.py needs these (it imports Django settings
+      # to compare JWT_SECRET against Django's SIGNING_KEY) — every other
+      # dataplane test deliberately runs without Django configured at all,
+      # to keep the data plane's actual runtime dependency direction honest.
+      DB_ENGINE: django.db.backends.sqlite3
+      DB_NAME: ":memory:"
+      SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,16 +45,16 @@ jobs:
           python-version: "3.14"
           cache: "pip"
       - run: pip install -r requirements.txt
-      # Phase 0: no real endpoints exist yet, so this just proves the FastAPI
-      # app object constructs. Phase 2 onward, add real endpoint tests here.
+      - run: python -c "from dataplane.main import app; assert app"
+      - run: python -m pytest dataplane/tests -v
       # Phase 5 onward, this is also where the dataplane/models/tables.py <->
       # Django-schema drift check from the architecture plan §2 should run.
-      - run: python -c "from dataplane.main import app; assert app"
 
   worker-import-check:
     runs-on: ubuntu-latest
     env:
       SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
       DB_ENGINE: django.db.backends.sqlite3
       DB_NAME: ":memory:"
     steps:

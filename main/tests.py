@@ -6,6 +6,8 @@ changing what is counted, and the table controls (filter, sort, paginate,
 export) agreeing with each other.
 """
 
+import json
+
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
@@ -313,3 +315,102 @@ class LoginIdentifierTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(User.objects.filter(username='newcomer').exists())
+
+
+class JWTAuthTests(TestCase):
+    """The additive JWT endpoints for KUIS-FE / FastAPI (architecture plan
+    §3, main/api_auth.py). The existing session-cookie login above must stay
+    unaffected by any of this — see test_session_login_is_unaffected."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.password = 'pw-for-tests-1'
+        cls.user = User.objects.create_user(
+            'researcher', email='researcher@example.com', password=cls.password, is_staff=True
+        )
+
+    def obtain_tokens(self, username='researcher', password=None):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': password or self.password}),
+            content_type='application/json',
+        )
+        return response, (response.json() if response.status_code == 200 else None)
+
+    def test_obtain_token_rejects_wrong_password(self):
+        response, _ = self.obtain_tokens(password='not-the-password')
+        self.assertEqual(response.status_code, 401)
+
+    def test_obtain_token_accepts_username_or_email(self):
+        # UsernameOrEmailBackend (main/auth_backends.py) runs unmodified
+        # under TokenObtainPairView — same identifier rules as session login.
+        by_username, _ = self.obtain_tokens('researcher')
+        by_email, _ = self.obtain_tokens('researcher@example.com')
+
+        self.assertEqual(by_username.status_code, 200)
+        self.assertEqual(by_email.status_code, 200)
+
+    def test_access_token_carries_expected_claims(self):
+        import jwt as pyjwt
+        from django.conf import settings
+
+        _, body = self.obtain_tokens()
+        claims = pyjwt.decode(body['access'], options={'verify_signature': False})
+
+        self.assertEqual(claims['token_type'], 'access')
+        self.assertEqual(claims['user_id'], str(self.user.pk))
+        self.assertEqual(claims['username'], 'researcher')
+        self.assertEqual(claims['email'], 'researcher@example.com')
+        self.assertIs(claims['is_staff'], True)
+        # FastAPI's dataplane/core/security.py verifies with this same
+        # signing key — the only secret this repo shares with the FastAPI
+        # process. A stale/mismatched JWT_SECRET would surface here first.
+        self.assertTrue(settings.SIMPLE_JWT['SIGNING_KEY'])
+
+    def test_refresh_rotates_and_blacklists_the_old_token(self):
+        _, body = self.obtain_tokens()
+
+        first_refresh = self.client.post(
+            reverse('token_refresh'),
+            data=json.dumps({'refresh': body['refresh']}),
+            content_type='application/json',
+        )
+        self.assertEqual(first_refresh.status_code, 200)
+        self.assertIn('refresh', first_refresh.json())  # ROTATE_REFRESH_TOKENS=True
+
+        # Reusing the now-rotated-away original refresh token must fail —
+        # BLACKLIST_AFTER_ROTATION=True. KUIS-FE's refresh route handler
+        # depends on this to know when to fall back to a real re-login.
+        reused = self.client.post(
+            reverse('token_refresh'),
+            data=json.dumps({'refresh': body['refresh']}),
+            content_type='application/json',
+        )
+        self.assertEqual(reused.status_code, 401)
+
+    def test_blacklist_prevents_further_refresh(self):
+        _, body = self.obtain_tokens()
+
+        blacklist = self.client.post(
+            reverse('token_blacklist'),
+            data=json.dumps({'refresh': body['refresh']}),
+            content_type='application/json',
+        )
+        self.assertEqual(blacklist.status_code, 200)
+
+        refresh_after_logout = self.client.post(
+            reverse('token_refresh'),
+            data=json.dumps({'refresh': body['refresh']}),
+            content_type='application/json',
+        )
+        self.assertEqual(refresh_after_logout.status_code, 401)
+
+    def test_session_login_is_unaffected(self):
+        """Adding rest_framework/SimpleJWT must not touch the server-rendered
+        pages' own session-cookie auth (config/urls.py's accounts/login/)."""
+        response = self.client.post(reverse('login'), {
+            'username': 'researcher',
+            'password': self.password,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.session.get('_auth_user_id'), str(self.user.pk))

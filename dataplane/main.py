@@ -10,7 +10,7 @@ Run locally with: uvicorn dataplane.main:app --reload --port 8001
 from fastapi import FastAPI
 
 from dataplane.core.config import settings
-from dataplane.routers import health
+from dataplane.routers import health, whoami
 
 app = FastAPI(
     title="KUIS Data Plane",
@@ -18,3 +18,4 @@ app = FastAPI(
 )
 
 app.include_router(health.router)
+app.include_router(whoami.router)

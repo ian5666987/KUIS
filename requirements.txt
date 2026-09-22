@@ -6,12 +6,22 @@ sqlparse==0.5.5
 tzdata==2026.1
 
 # --- FastAPI data plane (dataplane/) ---------------------------------------
-# Architecture plan §1/§8 Phase 0: health-check only for now. SQLAlchemy/
-# asyncpg join this list in Phase 2 when dataplane/models/tables.py and the
-# first real repository land.
+# Architecture plan §1/§8 Phase 2: SQLAlchemy/asyncpg join this list when
+# dataplane/models/tables.py and the first real repository land.
 fastapi==0.121.2
 uvicorn[standard]==0.38.0
 pydantic-settings==2.12.0
+# Verifies Django-issued JWTs statelessly (architecture plan §3). Also a
+# transitive dep of djangorestframework-simplejwt below, but pinned
+# explicitly since dataplane/core/security.py imports it directly.
+PyJWT==2.12.1
+
+# --- Django JWT auth (architecture plan §3, Phase 1) ------------------------
+# Django stays the auth/RBAC source of truth and issues the tokens FastAPI
+# verifies statelessly. TokenObtainPairView reuses Django's existing
+# UsernameOrEmailBackend via authenticate() with zero changes to it.
+djangorestframework==3.18.1
+djangorestframework-simplejwt==5.5.1
 
 # --- Worker (worker/) -------------------------------------------------------
 # Architecture plan §5/§8 Phase 0: Celery app boots with zero tasks
@@ -19,3 +29,10 @@ pydantic-settings==2.12.0
 # land in Phase 5.
 celery==5.6.0
 redis==7.1.0
+
+# --- Test tooling ------------------------------------------------------------
+# Django's own test runner (main/tests.py) needs neither — these are for
+# dataplane/tests/ only. Starlette's TestClient requires httpx explicitly
+# since it dropped its old requests-based client.
+pytest==9.0.1
+httpx==0.28.1

@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -44,6 +45,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize', # thousands separators in result tables
     'main', #add this so that all in the folder "main" can be part of the apps
+
+    # JWT auth for the Next.js frontend + FastAPI data plane (architecture
+    # plan §3). The server-rendered pages above keep using Django's ordinary
+    # session-cookie login untouched — these apps are purely additive.
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
@@ -145,6 +153,29 @@ LOGOUT_REDIRECT_URL = 'home'
 SEED_USER = env('SEED_USER', default='')
 SEED_PASSWORD = env('SEED_PASSWORD', default='')
 SEED_USER_TYPE = env('SEED_USER_TYPE', default='user')
+
+# --- JWT auth for Next.js / FastAPI (architecture plan §3) -----------------
+# TokenObtainPairView calls Django's normal authenticate(), which walks
+# AUTHENTICATION_BACKENDS above — UsernameOrEmailBackend works with zero
+# changes, login-by-username-or-email is inherited for free.
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    # Deliberately separate from SECRET_KEY: rotating this should never force
+    # rotating Django's session-cookie signing key, and vice versa. FastAPI
+    # verifies tokens with this same value (dataplane/core/config.py) — the
+    # only secret shared between the two services in this repo.
+    'SIGNING_KEY': env('JWT_SECRET'),
+}
 
 # Add constants for contact, this is a test email, not the actual one.
 # The actual email requires to use server/protocol such as Gmail SMTP, Outlook, SendGrid
