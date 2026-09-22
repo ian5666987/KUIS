@@ -30,7 +30,7 @@ SECRET_KEY = env('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
 
 # Application definition
@@ -126,6 +126,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# Needed for `collectstatic` at Docker image build time (docker/django.Dockerfile);
+# harmless in local dev where `runserver` serves static files directly instead.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Sign-in accepts a username or the email on the account; the default backend
 # stays in the list so admin-created and superuser accounts keep working.

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  django-tests:
+    runs-on: ubuntu-latest
+    env:
+      DB_ENGINE: django.db.backends.sqlite3
+      DB_NAME: ":memory:"
+      SECRET_KEY: ci-test-key-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      # docs/ONBOARDING.md §6: Django's test client adds 'testserver' to
+      # ALLOWED_HOSTS automatically, no override needed here.
+      - run: python manage.py test main
+
+  dataplane-import-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      # Phase 0: no real endpoints exist yet, so this just proves the FastAPI
+      # app object constructs. Phase 2 onward, add real endpoint tests here.
+      # Phase 5 onward, this is also where the dataplane/models/tables.py <->
+      # Django-schema drift check from the architecture plan §2 should run.
+      - run: python -c "from dataplane.main import app; assert app"
+
+  worker-import-check:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-test-key-not-for-production
+      DB_ENGINE: django.db.backends.sqlite3
+      DB_NAME: ":memory:"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - run: python -c "from worker.celery_app import app; assert app"
