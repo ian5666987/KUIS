@@ -26,6 +26,12 @@ PyJWT==2.12.1
 # UsernameOrEmailBackend via authenticate() with zero changes to it.
 djangorestframework==3.18.1
 djangorestframework-simplejwt==5.5.1
+# Phase 3: KUIS-FE calls Django/FastAPI directly from the browser
+# (architecture plan §6) — a genuinely cross-origin request (different
+# ports in dev, different subdomains in prod), which the browser blocks
+# without explicit CORS headers. Not needed until a real browser makes the
+# call — curl-based testing in Phases 1/2 never exercises this at all.
+django-cors-headers==4.9.0
 
 # --- Worker (worker/) -------------------------------------------------------
 # Architecture plan §5/§8 Phase 0: Celery app boots with zero tasks

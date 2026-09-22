@@ -52,10 +52,16 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Must come before CommonMiddleware per django-cors-headers' own docs —
+    # CommonMiddleware can redirect before CORS headers get a chance to be
+    # added, breaking preflight requests in ways that only show up in an
+    # actual browser (curl doesn't enforce or even send CORS preflight).
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -176,6 +182,17 @@ SIMPLE_JWT = {
     # only secret shared between the two services in this repo.
     'SIGNING_KEY': env('JWT_SECRET'),
 }
+
+# --- CORS for KUIS-FE (architecture plan §6, Phase 3) -----------------------
+# KUIS-FE calls this API directly from the browser (different origin — a
+# different port in dev, a different subdomain in prod), so without this the
+# browser silently blocks every request with no server-side error to find.
+# Comma-separated in .env; defaults to the local Next.js dev server so
+# `npm run dev` works out of the box.
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=['http://localhost:3000'])
+# Only the /api/ surface needs CORS at all — the server-rendered pages are
+# same-origin browser navigations, never fetched cross-origin.
+CORS_URLS_REGEX = r'^/api/.*$'
 
 # Add constants for contact, this is a test email, not the actual one.
 # The actual email requires to use server/protocol such as Gmail SMTP, Outlook, SendGrid

@@ -414,3 +414,48 @@ class JWTAuthTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.client.session.get('_auth_user_id'), str(self.user.pk))
+
+
+class CorpusApiTests(ExplorerTestCase):
+    """GET /api/corpora/ (main/api_corpus.py) — Phase 3's corpus picker data
+    source, the first JSON view of "Corpus Meta" alongside the existing
+    server-rendered corpus_dashboard."""
+
+    def auth_headers(self):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': 'researcher', 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        access = response.json()['access']
+        return {'HTTP_AUTHORIZATION': f'Bearer {access}'}
+
+    def test_a_session_cookie_alone_does_not_authenticate_the_api(self):
+        # ExplorerTestCase.setUp already force_login's self.user — every
+        # test here starts with a valid session cookie. This endpoint's
+        # DEFAULT_AUTHENTICATION_CLASSES is JWTAuthentication only (see
+        # config/settings.py's REST_FRAMEWORK), so that session must NOT be
+        # enough on its own; a real bearer token is required.
+        response = self.client.get(reverse('api_corpus_list'))
+        self.assertEqual(response.status_code, 401)
+
+    def test_lists_corpora_with_document_counts(self):
+        response = self.client.get(reverse('api_corpus_list'), **self.auth_headers())
+        self.assertEqual(response.status_code, 200)
+
+        by_name = {row['name']: row for row in response.json()}
+        self.assertEqual(by_name['Written 2023']['document_count'], 2)
+        self.assertEqual(by_name['Spoken 2024']['document_count'], 1)
+
+    def test_token_totals_are_zero_not_null_for_a_corpus_with_no_documents(self):
+        # Sum() over no rows is NULL, not 0 — main/api_corpus.py's
+        # SerializerMethodFields exist specifically to coerce this so
+        # KUIS-FE never has to null-check a count.
+        Corpus.objects.create(name='Empty corpus')
+
+        response = self.client.get(reverse('api_corpus_list'), **self.auth_headers())
+        empty = next(row for row in response.json() if row['name'] == 'Empty corpus')
+
+        self.assertEqual(empty['document_count'], 0)
+        self.assertEqual(empty['token_total'], 0)
+        self.assertEqual(empty['token_total_corrected'], 0)

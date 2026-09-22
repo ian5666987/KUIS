@@ -20,8 +20,6 @@ from django.http import HttpResponse
 from main.views import home
 from main.views import CustomLoginView
 from django.contrib.auth.views import LogoutView
-from rest_framework_simplejwt.views import TokenRefreshView, TokenBlacklistView
-from main.api_auth import KUISTokenObtainPairView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -34,12 +32,9 @@ urlpatterns = [
     path('accounts/login/', CustomLoginView.as_view(), name='login'),
     path('accounts/logout/', LogoutView.as_view(), name='logout'),
 
-    # JWT issuance for the Next.js frontend + FastAPI data plane (architecture
-    # plan §3). Purely additive — the session-cookie login/logout above are
-    # untouched and keep serving the server-rendered pages throughout the
-    # migration.
-    path('api/auth/token/', KUISTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/auth/token/blacklist/', TokenBlacklistView.as_view(), name='token_blacklist'),
+    # JSON API for KUIS-FE/FastAPI (architecture plan §3/§6) — purely
+    # additive, the session-cookie pages above are untouched. See
+    # main/api_urls.py for the routes themselves.
+    path('api/', include('main.api_urls')),
 ]
 

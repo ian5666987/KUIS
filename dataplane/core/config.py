@@ -34,12 +34,22 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
+    # Phase 3: same var Django's CORS_ALLOWED_ORIGINS reads (config/settings.py),
+    # kept as a plain comma-separated string here too rather than pydantic-
+    # settings' default JSON-list parsing for env vars — one format for one
+    # env var shared by both services, not two.
+    cors_allowed_origins: str = "http://localhost:3000"
+
     @property
     def database_url(self) -> str:
         return (
             f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 settings = Settings()
