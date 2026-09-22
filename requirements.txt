@@ -6,11 +6,15 @@ sqlparse==0.5.5
 tzdata==2026.1
 
 # --- FastAPI data plane (dataplane/) ---------------------------------------
-# Architecture plan §1/§8 Phase 2: SQLAlchemy/asyncpg join this list when
-# dataplane/models/tables.py and the first real repository land.
 fastapi==0.121.2
 uvicorn[standard]==0.38.0
 pydantic-settings==2.12.0
+# Reads the same Postgres tables Django's migrations own (architecture plan
+# §2) — read-only Core Table defs in dataplane/models/tables.py, no ORM
+# models, no Alembic. asyncpg is the driver behind the async engine.
+SQLAlchemy==2.0.44
+greenlet==3.2.4
+asyncpg==0.31.0
 # Verifies Django-issued JWTs statelessly (architecture plan §3). Also a
 # transitive dep of djangorestframework-simplejwt below, but pinned
 # explicitly since dataplane/core/security.py imports it directly.
@@ -35,4 +39,5 @@ redis==7.1.0
 # dataplane/tests/ only. Starlette's TestClient requires httpx explicitly
 # since it dropped its old requests-based client.
 pytest==9.0.1
+pytest-asyncio==1.3.0
 httpx==0.28.1

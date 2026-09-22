@@ -29,13 +29,34 @@ jobs:
 
   dataplane-tests:
     runs-on: ubuntu-latest
+    # test_kwic_repository.py / test_kwic_router.py need a REAL Postgres —
+    # asyncpg has no sqlite equivalent, and the self-join SQL these tests
+    # exercise is exactly the kind of thing that only fails when actually
+    # executed (see dataplane/repositories/postgres/kwic_repository.py's
+    # docstring on the ordering bug this caught during development).
+    # DB_NAME must contain "test" — test_kwic_repository.py refuses to run
+    # (and would delete all Document/Corpus rows) otherwise.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kuis_dataplane_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      # Only test_jwt_consistency.py needs these (it imports Django settings
-      # to compare JWT_SECRET against Django's SIGNING_KEY) — every other
-      # dataplane test deliberately runs without Django configured at all,
-      # to keep the data plane's actual runtime dependency direction honest.
-      DB_ENGINE: django.db.backends.sqlite3
-      DB_NAME: ":memory:"
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: kuis_dataplane_test
       SECRET_KEY: ci-test-key-not-for-production
       JWT_SECRET: ci-test-jwt-secret-not-for-production
     steps:
@@ -46,6 +67,11 @@ jobs:
           cache: "pip"
       - run: pip install -r requirements.txt
       - run: python -c "from dataplane.main import app; assert app"
+      # Builds the schema Django owns (architecture plan §2) before the
+      # dataplane tests read/write it — test_kwic_repository.py's fixture
+      # also calls this itself, so this step is really just an early,
+      # clearer failure point if migrations themselves are broken.
+      - run: python manage.py migrate --noinput
       - run: python -m pytest dataplane/tests -v
       # Phase 5 onward, this is also where the dataplane/models/tables.py <->
       # Django-schema drift check from the architecture plan §2 should run.

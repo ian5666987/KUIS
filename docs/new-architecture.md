@@ -15,7 +15,7 @@
 |---|---|---|
 | 0 | Repo scaffolding, Docker, CI — zero behavior change | ✅ done (2026-09-22) |
 | 1 | JWT auth (Django SimpleJWT + FastAPI verification + KUIS-FE login) | ✅ done (2026-09-22) |
-| 2 | FastAPI skeleton + all 5 repository ABCs + fast-KWIC port | ⬜ not started |
+| 2 | FastAPI skeleton + all 5 repository ABCs + fast-KWIC port | ✅ done (2026-09-22) |
 | 3 | Next.js MVP consuming fast-KWIC (first true end-to-end proof) | ⬜ not started |
 | 4 | Remaining feature ports: word frequency → collocations → n-grams | ⬜ not started |
 | 5 | Tier 1/2 schema optimization (`WordType`, `DocumentWordFreq`, `DocumentNgram`) | ⬜ not started |
@@ -79,6 +79,33 @@
 - `main/tests.py`: 35/35. `dataplane/tests/`: 15/15. KUIS-FE `npm run build` and `npm run lint`: clean.
 
 **Not done from Phase 1's scope:** nothing is committed to git in either repo. No Django DRF endpoint exists yet for anything beyond auth (document status, corpus metadata, etc. — those are Phase 5+). No load-bearing feature calls any of this yet; `analysis/kwic` and friends are still stubs (Phase 2/3/4).
+
+### Phase 2 — done, what actually landed
+
+**The fast-KWIC port is real and parity-checked against live Django output**, not just written and unit-tested in isolation. All 5 repository ABCs are defined; `KWICRepository` is the one with a working Postgres implementation.
+
+- `dataplane/repositories/base.py` — all 5 ABCs (`KWICRepository`, `FrequencyRepository`, `CollocationRepository`, `NgramRepository`, `ErrorAnalyticsRepository`) plus shared `Mode`/`MatchMode`/`SortDirection` enums and domain dataclasses. Only `KWICRepository`'s shape has been proven against real data; the other four are explicitly marked provisional in their own docstrings.
+- `dataplane/models/tables.py` — SQLAlchemy Core tables for `main_document`, `main_corpus`, `main_token`, `main_corpus_documents`, with every table/column name confirmed against Django's actual `_meta` (not guessed).
+- `dataplane/core/db.py` — async engine/session factory, `get_db_session` FastAPI dependency.
+- `dataplane/repositories/shared.py` — `resolve_document_ids(session, corpus_ids)`, the corpus→document resolution every future feature repository will also need (mirrors `main/views.py::_get_selected_documents`'s `.distinct()` dedup).
+- `dataplane/repositories/postgres/kwic_repository.py` — ports `_word_index_matches`/`_hydrate_word_index` onto an N-word self-join over `Token`, **generalized from single-word to phrase search** so this one repository absorbs legacy `kwic` too (architecture plan §4) — confirmed below, not just asserted. Also fixes `optimisation_plan.md` defects #3 (materializing every match before paginating) and #4 (loading a whole document to slice a window): pagination is a real SQL `LIMIT`/`OFFSET`, total count is a separate `COUNT(*)`, and context windows for an entire page of hits are fetched in one batched query via `position BETWEEN`.
+- `dataplane/services/kwic_service.py`, `dataplane/schemas/kwic.py`, `dataplane/routers/kwic.py` — new `GET /api/v1/kwic`, wired into `dataplane/main.py`. Any authenticated user may call it (matches `kwic_search`'s plain `@login_required`, no staff requirement).
+- `dataplane/tests/test_schema_drift.py` — new CI guard comparing `dataplane/models/tables.py` against Django's real `_meta` column-for-column; deliberately broken and confirmed to fail before being confirmed to pass clean.
+- `pytest.ini` (new) + `pytest-asyncio` — needed once dataplane tests stopped being pure-Python unit tests and started touching an async database.
+
+**One real bug found by testing against actual Postgres, not caught by writing or reading the code:** the first cut of the self-join query built its match-finding `SELECT` from an aliased `Token` (`t0`, `t1`, ...) but then tried to `ORDER BY` the *unaliased* `main_token` table — a query Postgres rejects at execution time (`invalid reference to FROM-clause entry for table "main_token"`), invisible from reading the SQLAlchemy Python code alone. Fixed by threading the base alias through to the caller instead of reaching back for the module-level `token` table object.
+
+**A second issue, test-infrastructure rather than product code:** `TestClient` + a module-level pooled async engine don't mix across multiple test functions — each `TestClient` spins its own event loop, and a pooled connection checked out in a since-closed loop crashes on its next use (`RuntimeError: Event loop is closed`). Fixed by giving router-level tests their own `NullPool`-based engine via `app.dependency_overrides`, scoped to the test client only; the production engine's real connection pooling is untouched.
+
+**Verified, not just written (this phase):**
+- A dedicated local test database (`kuis_dataplane_test`, migrated via Django, seeded with known fixture data — the same `<segment Correction=...>` XML shape `main/tests.py` already uses) was created specifically so none of this testing ever touched the real dev database (`corpus_db`). Confirmed before and after: still exactly 3 documents / 2 corpora / 1090 tokens, same titles and ids, completely untouched.
+- **Byte-for-byte parity**, live, against the real Django app running on that same seeded database: single-word search against `/analysis/kwic/search/export/` CSV, two-word phrase search against legacy `/analysis/kwic/export/` CSV, and corrected-mode search (`tetapi` via a segment's `Correction` attribute) — all three matched the new `/api/v1/kwic` endpoint's output exactly, including document-boundary window truncation.
+- Auth enforcement end-to-end: a request with no bearer token gets 401; a Django-issued token works; missing required query params (`q`, `corpus_ids`) get 422; an unknown `corpus_id` returns an empty result set, not an error.
+- The schema-drift guard was deliberately broken (renamed a column in `tables.py`) and confirmed to fail with a clear message, then confirmed to pass again once reverted.
+- 37/37 `dataplane/tests/` passing (11 repository, 7 router, 4 schema-drift, plus the 15 from Phase 1), run against the real Postgres test database exactly as the updated CI job now does. `main/tests.py`: still 35/35, untouched by this phase.
+- `.github/workflows/ci.yml`'s `dataplane-tests` job now runs a real `postgres:16` service container (previously sqlite-only, which can't run these tests at all — asyncpg has no sqlite driver) and runs Django's migrate against it before the dataplane suite, matching how the real deployment bootstraps.
+
+**Not done from Phase 2's scope:** `analysis/kwic` in KUIS-FE is still a stub — wiring a real page to this endpoint is Phase 3. `FrequencyRepository`/`CollocationRepository`/`NgramRepository`/`ErrorAnalyticsRepository` have interfaces but zero implementations. `dataplane/dependencies.py` has no `get_frequency_service` etc. yet. Nothing is committed to git in either repo.
 
 ---
 
@@ -146,7 +173,7 @@ KUIS/
   .github/workflows/{ci,deploy}.yml
 ```
 
-*(Status: the tree above exists. `dependencies.py` and `core/security.py` were written in Phase 1 (auth only). `core/db.py`, `models/tables.py`, and everything under `schemas/`, `repositories/`, `services/`, and `routers/` other than `health.py`/`whoami.py` are still empty/unwritten, along with `worker/tasks/*` — Phase 2+.)*
+*(Status: the tree above exists, including `core/db.py`, `models/tables.py`, and the KWIC slice of `repositories/`, `repositories/postgres/`, `services/`, `schemas/`, `routers/` — all written and parity-tested in Phase 2. `repositories/base.py` defines all 5 ABCs; only `KWICRepository` has a concrete implementation. Frequency/Collocation/Ngram/ErrorAnalytics have no `services/`/`schemas/`/`routers/` files yet — Phase 4/6. `worker/tasks/*` is still empty — Phase 5.)*
 
 **What maps to what** (reuse, don't duplicate):
 
@@ -219,17 +246,17 @@ FastAPI verifies statelessly: `dataplane/core/security.py` decodes with the shar
 
 Order: **fast-KWIC → word frequency → collocations → n-grams → legacy KWIC (folded in, not separately ported)**. "Done" per step = FastAPI endpoint exists and is parity-checked against the live Django view, Next.js page consumes it, the old Django view stays reachable and untouched until Phase 7.
 
-**Fast-KWIC first**: `kwic_search` ([views.py:984-1016](../main/views.py#L984-L1016)) is the only feature already reading `Token` instead of re-parsing content — porting it is pure plumbing (translate an existing ORM query to SQLAlchemy), validating JWT auth, the Repository/Service/Router layering, and the Next.js data-fetching pattern all at once, in the lowest-risk feature.
+**Fast-KWIC first**: `kwic_search` ([views.py:984-1016](../main/views.py#L984-L1016)) is the only feature already reading `Token` instead of re-parsing content — porting it is pure plumbing (translate an existing ORM query to SQLAlchemy), validating JWT auth, the Repository/Service/Router layering, and the Next.js data-fetching pattern all at once, in the lowest-risk feature. **✅ Done in Phase 2, parity-confirmed against live Django output** — see the Phase 2 status block above. Still open: the Next.js data-fetching pattern isn't proven yet (Phase 3) — this phase only proved the FastAPI side.
 
 **Word frequency next**: becomes `SELECT word, COUNT(*) ... GROUP BY word ... LIMIT/OFFSET`. Ship this against the *raw* `word` column (Tier-0 shape) — it doesn't need to wait for the Tier-1 `WordType` migration. This is the key sequencing insight: **feature ports and schema-tier work are orthogonal**, because the Repository boundary is exactly what makes re-optimizing a query later invisible to everything above it.
 
 **Collocations / n-grams**: need a window function (`LAG`/`LEAD` over `(document_id, mode)` ordered by `position`) — ship a "correct but not yet fast" version against raw `Token` first, then swap the repository's internals onto `DocumentNgram` once Tier 2 lands (Phase 5) — same Service, Router, and Next.js page, only the repository's SQL changes. This is the repository-swap payoff happening once *before* ClickHouse ever enters the picture.
 
-**KWIC repository fixes known defects while porting**: current `_word_index_matches` ([views.py:942-947](../main/views.py#L942-L947)) materializes every match before paginating (defect #3); `_hydrate_word_index` ([views.py:960-967](../main/views.py#L960-L967)) loads a document's whole word list to slice a ±N window (defect #4). The new `KWICRepository.search()` instead does a separate `COUNT(*)`, a real `LIMIT/OFFSET` (or keyset) for the page, and `position BETWEEN :lo AND :hi` per hit for context.
+**KWIC repository fixes known defects while porting**: current `_word_index_matches` ([views.py:942-947](../main/views.py#L942-L947)) materializes every match before paginating (defect #3); `_hydrate_word_index` ([views.py:960-967](../main/views.py#L960-L967)) loads a document's whole word list to slice a ±N window (defect #4). The new `KWICRepository.search()` instead does a separate `COUNT(*)`, a real `LIMIT/OFFSET` (or keyset) for the page, and `position BETWEEN :lo AND :hi` per hit for context. **✅ Done** — see `dataplane/repositories/postgres/kwic_repository.py`.
 
-**Legacy KWIC's redundancy, resolved**: `kwic` (phrase search, live-parsed) and `kwic_search` (single-word, Token-table) differ only in phrase-vs-word and live-parse-vs-indexed. Extending `KWICRepository.search()` to accept `words: list[str]` (already in the §1 interface) makes the fast path a strict superset — a multi-word query is a handful of position-shifted joins (query length is capped at `KWIC_WINDOW_MAX`=10). **No separate port of legacy `kwic` is planned**; one repository/service/router/Next.js page covers both once phrase support ships. `kwic` stays alive in Django until Next.js's concordance page is confirmed to cover it, then retires in Phase 7. Worth a quick confirm from whoever owns product requirements before treating this as final.
+**Legacy KWIC's redundancy, resolved**: `kwic` (phrase search, live-parsed) and `kwic_search` (single-word, Token-table) differ only in phrase-vs-word and live-parse-vs-indexed. Extending `KWICRepository.search()` to accept `words: list[str]` (already in the §1 interface) makes the fast path a strict superset — a multi-word query is a handful of position-shifted joins (query length is capped at `KWIC_WINDOW_MAX`=10). **No separate port of legacy `kwic` is planned**; one repository/service/router/Next.js page covers both once phrase support ships. `kwic` stays alive in Django until Next.js's concordance page is confirmed to cover it, then retires in Phase 7. **✅ Phrase support is done and parity-checked against live `kwic` output** (not just `kwic_search`'s single-word case) — the redundancy claim is now proven, not just argued. Still worth a quick product confirm before actually retiring the Django view in Phase 7.
 
-*(Status: not started — Phase 2 (fast-KWIC) through Phase 4 (the rest).)*
+*(Status: **fast-KWIC ✅ done** (Phase 2). Word frequency, collocations, n-grams still not started — Phase 4.)*
 
 ---
 
@@ -295,7 +322,7 @@ Matches the verified house pattern (checked against `identity-service-internal`'
 
 1. **Repo scaffolding, zero behavior change** — ✅ done. Fixed `ALLOWED_HOSTS`/`STATIC_ROOT`, added all three Dockerfiles + compose + CI for KUIS, scaffolded empty `dataplane/` (`/health` only) and `worker/` (no tasks yet), created the `KUIS-FE` skeleton. KUIS-FE's own Docker/CI files are the one Phase-0 item still outstanding. Django still serves 100% of traffic.
 2. **JWT auth** — ✅ done. DRF + SimpleJWT + blacklist, custom claims, FastAPI verification proven against a new protected `/api/v1/whoami` endpoint (not `/health`, which stays deliberately open), KUIS-FE login page + cookie proxy + refresh-on-401 retry, all verified against a live Django + FastAPI + Next.js dev server chain. `proxy.ts`'s guard still only checks cookie *presence*, by design — see its comment for why deeper verification isn't needed there. No analysis features exposed yet (that starts Phase 2/3).
-3. **FastAPI skeleton + fast-KWIC port** — ⬜ not started. All 5 repository ABCs to be defined; only `KWICRepository` gets a real Postgres implementation + service + router, parity-checked against `/analysis/kwic/search/`.
+3. **FastAPI skeleton + fast-KWIC port** — ✅ done. All 5 repository ABCs defined; `KWICRepository` has a real Postgres implementation + service + router, parity-checked against BOTH `/analysis/kwic/search/` (single-word) and `/analysis/kwic/` (phrase search) — byte-for-byte matching output on a real Postgres database.
 4. **Next.js MVP on fast-KWIC** — ⬜ not started. Corpus picker + concordance results, the first true end-to-end proof of the whole target architecture.
 5. **Remaining feature ports** — ⬜ not started. Word frequency, then collocations, then n-grams (window-function version against raw `Token`); legacy KWIC folded into fast-KWIC's phrase-search extension, not separately ported.
 6. **Tier 1/2 schema optimization** — ⬜ not started. `WordType`, normalized `Token`, `DocumentWordFreq`, `DocumentNgram` migrations; worker starts populating them plus a backfill for existing documents; frequency/collocation/ngram repositories swap their internals onto the new tables with Service/Router/Next.js untouched.
@@ -306,9 +333,9 @@ Matches the verified house pattern (checked against `identity-service-internal`'
 
 ## Verification
 
-- **Per-feature parity**: for each FastAPI port, run a script comparing its JSON output against the equivalent Django view's rendered/CSV-export data for a fixed corpus selection, before wiring the Next.js page to it. *(Not yet applicable — no feature ported yet.)*
+- **Per-feature parity**: for each FastAPI port, run a script comparing its JSON output against the equivalent Django view's rendered/CSV-export data for a fixed corpus selection, before wiring the Next.js page to it. ✅ done for fast-KWIC — compared live against both `/analysis/kwic/search/export/` and `/analysis/kwic/export/` CSV output on a real Postgres database seeded with known data; exact match on every row.
 - **Auth**: confirm a JWT obtained from `POST /api/auth/token/` is accepted by a FastAPI endpoint with no Django call in the request path; confirm the existing session-cookie login still works unmodified. ✅ done — verified manually end-to-end and now covered permanently by `main/tests.py::JWTAuthTests` + `dataplane/tests/`.
-- **Schema drift check**: CI command comparing Django's `_meta` schema dump against `dataplane/models/tables.py`. *(Not yet applicable — Phase 5.)*
+- **Schema drift check**: CI command comparing Django's `_meta` schema dump against `dataplane/models/tables.py`. ✅ done in Phase 2, ahead of the original Phase 5 schedule — `dataplane/tests/test_schema_drift.py`, part of the CI `dataplane-tests` job. Deliberately broken (a column renamed) and confirmed to fail with a clear message, then confirmed to pass again once reverted. Will need extending, not rewriting, once Tier 1/2 tables are added in Phase 5.
 - **Django regression**: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: python manage.py test main` must keep passing unmodified throughout every phase. ✅ passing as of Phase 0 (29/29).
 - **Worker**: upload a document, confirm `Document.status` moves `indexing` → `ready`. *(Not yet applicable — Phase 5.)*
 - **Deployment**: `docker compose build` succeeds for all three KUIS services plus KUIS-FE; each container starts and responds on its internal port. ✅ verified for `dataplane` (built image + container run + `/health` response). `django`/`worker` images not yet build-tested; KUIS-FE has no Dockerfile yet.

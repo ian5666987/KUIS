@@ -1,15 +1,22 @@
 """
 FastAPI dependencies shared across routers (architecture plan §1/§3).
 
-PHASE 1: get_current_user / require_staff. get_db_session and
-get_repository(...) land in Phase 2 alongside dataplane/models/tables.py and
-the first repository implementation.
+get_current_user / require_staff: Phase 1. get_db_session / get_kwic_service:
+Phase 2, alongside dataplane/models/tables.py and the first repository
+implementation. The other four get_<feature>_service factories land as each
+repository is implemented (Phase 4/6).
 """
+
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from dataplane.core.db import get_db_session
 from dataplane.core.security import AuthenticatedUser, TokenError, decode_access_token
+from dataplane.repositories.postgres.kwic_repository import PostgresKWICRepository
+from dataplane.services.kwic_service import KWICService
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -30,3 +37,10 @@ def require_staff(user: AuthenticatedUser = Depends(get_current_user)) -> Authen
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required.")
 
     return user
+
+
+def get_kwic_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> KWICService:
+    # The concrete repository is chosen here and nowhere else — this is the
+    # one line that changes when KWICRepository grows an OpenSearch
+    # implementation (architecture plan §1's central design goal).
+    return KWICService(session, PostgresKWICRepository(session))
