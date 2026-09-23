@@ -6,75 +6,13 @@ level (see the ordering bug this test style caught during development:
 `token.c.document_id` referenced outside its own FROM clause, invisible
 without actually executing the query against Postgres).
 
-Safety guard: refuses to run unless DB_NAME contains "test" — this fixture
-DELETES ALL Document/Corpus rows in whatever database it's pointed at
-before seeding known fixture data, so accidentally pointing it at a real
-dev/prod database would be destructive. Point DB_NAME at a dedicated,
-disposable test database (locally: `createdb kuis_dataplane_test`; in CI:
-the ephemeral `postgres` service container — see .github/workflows/ci.yml).
+seeded_corpus / session / document_ids fixtures live in conftest.py (shared
+with test_ranked_query.py and the Phase 4 router tests, once a third file
+needed the same trio this file originally defined alone).
 """
 
-import os
-
-import django
-import pytest
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
-
-from django.core.management import call_command  # noqa: E402
-
-from dataplane.core.db import async_session_factory, engine  # noqa: E402
-from dataplane.repositories.base import Mode  # noqa: E402
-from dataplane.repositories.postgres.kwic_repository import PostgresKWICRepository  # noqa: E402
-from dataplane.repositories.shared import resolve_document_ids  # noqa: E402
-
-CORPUS_XML = """<document>
-  <header><textfile>sample</textfile><lang>indonesian</lang></header>
-  <body>
-    saya suka makan nasi goreng
-    <segment id="1" features="eror;leksikal" Correction="tetapi">tapi</segment>
-    saya tidak suka nasi goreng lagi
-  </body>
-</document>"""
-
-PLAIN_TEXT = "saya suka nasi goreng dan saya suka nasi goreng lagi"
-
-
-@pytest.fixture(scope="module")
-def seeded_corpus():
-    db_name = os.environ.get("DB_NAME", "")
-    if "test" not in db_name.lower():
-        pytest.fail(
-            f"Refusing to run: DB_NAME={db_name!r} doesn't look like a test database "
-            "(must contain 'test'). This fixture deletes all Document/Corpus rows."
-        )
-
-    call_command("migrate", "--noinput", verbosity=0)
-
-    from main.models import Corpus, Document
-
-    Document.objects.all().delete()
-    Corpus.objects.all().delete()
-
-    annotated = Document.objects.create(title="annotated.xml", content=CORPUS_XML)
-    plain = Document.objects.create(title="plain.txt", content=PLAIN_TEXT)
-    corpus = Corpus.objects.create(name="Test corpus")
-    corpus.documents.set([annotated, plain])
-
-    return {"corpus_id": corpus.id, "doc1_id": annotated.id, "doc2_id": plain.id}
-
-
-@pytest.fixture
-async def session():
-    async with async_session_factory() as s:
-        yield s
-    await engine.dispose()
-
-
-@pytest.fixture
-async def document_ids(seeded_corpus, session):
-    return await resolve_document_ids(session, [seeded_corpus["corpus_id"]])
+from dataplane.repositories.base import Mode
+from dataplane.repositories.postgres.kwic_repository import PostgresKWICRepository
 
 
 class TestSingleWordSearch:

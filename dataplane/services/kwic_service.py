@@ -16,13 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import KWICHit, KWICRepository, Mode
 from dataplane.repositories.shared import resolve_document_ids
+from dataplane.services.pagination import normalize_per_page
 
 KWIC_WINDOW_MIN = 2
 KWIC_WINDOW_MAX = 10
 KWIC_WINDOW_DEFAULT = 5
-
-PER_PAGE_CHOICES = (25, 50, 100, 250)
-DEFAULT_PER_PAGE = 50
 
 
 @dataclass(frozen=True)
@@ -43,10 +41,6 @@ class KWICService:
     def _clamp_window(window: int) -> int:
         return min(max(window, KWIC_WINDOW_MIN), KWIC_WINDOW_MAX)
 
-    @staticmethod
-    def _normalize_per_page(per_page: int) -> int:
-        return per_page if per_page in PER_PAGE_CHOICES else DEFAULT_PER_PAGE
-
     async def search(
         self,
         corpus_ids: list[int],
@@ -57,7 +51,7 @@ class KWICService:
         per_page: int,
     ) -> KWICSearchResult:
         window = self._clamp_window(window)
-        per_page = self._normalize_per_page(per_page)
+        per_page = normalize_per_page(per_page)
         page = max(page, 1)
 
         words = query.strip().lower().split()

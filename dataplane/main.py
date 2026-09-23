@@ -1,9 +1,10 @@
 """
 FastAPI data plane — KWIC, frequency, n-gram, collocation, error analytics
-(architecture plan §1). Phase 2 adds the first real feature: fast-KWIC,
-ported from main/views.py::kwic_search and extended to phrase search (see
-dataplane/repositories/postgres/kwic_repository.py). Frequency/collocation/
-ngram/error_analytics routers land in Phase 4/6.
+(architecture plan §1). Phase 2 ported fast-KWIC. Phase 4 adds word
+frequency, collocations, and n-grams, all three sharing one query builder
+(dataplane/repositories/postgres/_ranked_query.py) at different values of
+n. error_analytics is the one router still missing — Phase 6, blocked on
+the error-type taxonomy.
 
 Run locally with: uvicorn dataplane.main:app --reload --port 8001
 """
@@ -12,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dataplane.core.config import settings
-from dataplane.routers import health, kwic, whoami
+from dataplane.routers import collocations, frequency, health, kwic, ngrams, whoami
 
 app = FastAPI(
     title="KUIS Data Plane",
@@ -33,3 +34,6 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(whoami.router)
 app.include_router(kwic.router)
+app.include_router(frequency.router)
+app.include_router(collocations.router)
+app.include_router(ngrams.router)
