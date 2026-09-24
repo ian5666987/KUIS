@@ -6,9 +6,8 @@ tokenization against a second ORM (architecture plan §1's "who writes"
 rule — the worker is the only writer of Token/aggregate tables, always
 through Django's ORM).
 
-PHASE 0: zero tasks registered. worker/tasks/{indexing,aggregates,
-maintenance}.py land in Phase 5, replacing main/models.py's synchronous
-post_save signal.
+Phase 5: worker/tasks/{indexing,aggregates}.py are real. maintenance.py
+(retokenize-as-a-task, content-hash staleness checks) is still a stub.
 
 Run locally with: celery -A worker.celery_app worker --loglevel=info
 """
@@ -29,3 +28,13 @@ redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 app = Celery("kuis", broker=redis_url, backend=redis_url)
 app.autodiscover_tasks(["worker"])
+
+# Standard Celery testing pattern: with this on, .delay()/.apply_async()
+# execute synchronously in-process instead of enqueuing to Redis. Set by
+# main/tests.py and dataplane/tests/conftest.py's test env (CELERY_TASK_
+# ALWAYS_EAGER=1) so test fixtures exercise the REAL indexing task —
+# tokenize + hash + aggregate — rather than a separate hand-rolled test-only
+# setup path that could drift from what production actually does.
+if os.environ.get("CELERY_TASK_ALWAYS_EAGER") == "1":
+    app.conf.task_always_eager = True
+    app.conf.task_eager_propagates = True

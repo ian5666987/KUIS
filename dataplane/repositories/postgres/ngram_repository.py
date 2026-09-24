@@ -1,12 +1,13 @@
-"""Ports main/views.py::ngrams (_count_words(size=n) + _rank_counter) onto
-SQL — n is caller-supplied (main/views.py::NGRAM_SIZES restricts it to
-2-5 in the UI; that validation belongs in the service layer, not here —
-this repository is structurally happy with any n >= 1)."""
+"""Ports main/views.py::ngrams onto SQL — n is caller-supplied (validated to
+2-5 by NgramService, matching main/views.py::NGRAM_SIZES). Phase 5: swapped
+onto Tier-2's DocumentNgram (via _aggregate_query.py) instead of Tier-0's
+raw self-join — see frequency_repository.py's docstring for what "swapped"
+means here (nothing above this file changed)."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import MatchMode, Mode, NgramRepository, RankedPage, SortDirection
-from dataplane.repositories.postgres._ranked_query import compute_ranked_page
+from dataplane.repositories.postgres._aggregate_query import compute_ngram_agg_page
 
 
 class PostgresNgramRepository(NgramRepository):
@@ -25,6 +26,6 @@ class PostgresNgramRepository(NgramRepository):
         limit: int,
         offset: int,
     ) -> RankedPage:
-        return await compute_ranked_page(
+        return await compute_ngram_agg_page(
             self._session, document_ids, mode, n, query, match_mode, sort, direction, limit, offset
         )

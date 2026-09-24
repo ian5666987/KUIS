@@ -20,17 +20,26 @@ Ports main/views.py::_count_words + _rank_counter onto SQL:
   - _rank_counter's filter -> two-pass-sort -> paginate pipeline becomes a
     filtered/ordered/paginated SELECT over that grouped result.
 
-Ships against the raw Token.word column (Tier 0 shape) — this file is
-exactly what Phase 5's WordType/DocumentNgram migration replaces
-internally, with the Frequency/Collocation/Ngram interfaces and everything
-above them (Service, Router, Next.js) unchanged.
+Ships as a self-join over Token — this WAS the Tier-0 production shape
+until Phase 5's WordType/DocumentWordFreq/DocumentNgram tables landed and
+the three concrete repositories swapped their internals onto
+_aggregate_query.py instead. Kept alive (not deleted) as a correctness
+cross-check: dataplane/tests/test_tier_swap_consistency.py asserts Tier 0
+and Tier 2 produce IDENTICAL RankedPages for the same query, on the theory
+that the swap should be invisible in output, not just in the Service/
+Router/Next.js layers plan §1 already promised were untouched.
+
+Phase 5 update: joins WordType for the word string, since Token.word_type
+FK replaced Token.word (architecture plan §2, Tier 1) — the self-join
+technique itself is unaffected, only which column holds the word.
 """
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataplane.models.tables import token
-from dataplane.repositories.base import MatchMode, Mode, RankedPage, RankedRow, SortDirection
+from dataplane.models.tables import token, word_type
+from dataplane.repositories.base import MatchMode, Mode, RankedPage, SortDirection
+from dataplane.repositories.postgres._ranked_pagination import paginate_sql_source
 
 
 def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
@@ -38,11 +47,13 @@ def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
     documents — item is the window's words space-joined (a single word when
     n=1). Not yet filtered, sorted, or paginated; see compute_ranked_page."""
     base = token.alias("t0")
-    from_clause = base
-    word_cols = [base.c.word]
+    base_wt = word_type.alias("wt0")
+    from_clause = base.join(base_wt, base_wt.c.id == base.c.word_type_id)
+    word_cols = [base_wt.c.form]
 
     for i in range(1, n):
         t = token.alias(f"t{i}")
+        wt = word_type.alias(f"wt{i}")
         from_clause = from_clause.join(
             t,
             and_(
@@ -50,10 +61,10 @@ def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
                 t.c.mode == base.c.mode,
                 t.c.position == base.c.position + i,
             ),
-        )
-        word_cols.append(t.c.word)
+        ).join(wt, wt.c.id == t.c.word_type_id)
+        word_cols.append(wt.c.form)
 
-    item_expr = base.c.word if n == 1 else func.concat_ws(" ", *word_cols)
+    item_expr = base_wt.c.form if n == 1 else func.concat_ws(" ", *word_cols)
 
     return (
         select(item_expr.label("item"), func.count().label("count"))
@@ -97,42 +108,8 @@ async def compute_ranked_page(
         )
     ).scalar_one()
 
-    type_count = (await session.execute(select(func.count()).select_from(source))).scalar_one()
-
-    filtered = select(source.c.item, source.c.count)
-
-    if query:
-        term = query.strip().lower()
-        if match_mode == MatchMode.STARTS:
-            filtered = filtered.where(source.c.item.startswith(term))
-        elif match_mode == MatchMode.ENDS:
-            filtered = filtered.where(source.c.item.endswith(term))
-        elif match_mode == MatchMode.EXACT:
-            filtered = filtered.where(source.c.item == term)
-        else:
-            filtered = filtered.where(source.c.item.contains(term))
-
-    result_count = (await session.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
-
-    # Mirrors main/views.py::_rank_counter's two-pass sort exactly: sort by
-    # item is a plain alphabetical order/reverse; any other sort orders by
-    # count with an ALWAYS-ascending alphabetical tie-break (Python's stable
-    # sort keeps the first pass's alphabetical order for equal counts
-    # regardless of reverse=True/False — see this file's test suite for the
-    # case that would silently regress if this were "ORDER BY count DESC,
-    # item DESC" instead).
-    if sort == "item":
-        order = source.c.item.asc() if direction == SortDirection.ASC else source.c.item.desc()
-        filtered = filtered.order_by(order)
-    else:
-        count_order = source.c.count.asc() if direction == SortDirection.ASC else source.c.count.desc()
-        filtered = filtered.order_by(count_order, source.c.item.asc())
-
-    page_rows = (await session.execute(filtered.limit(limit).offset(offset))).all()
-
-    return RankedPage(
-        rows=[RankedRow(item=item, count=count) for item, count in page_rows],
-        result_count=result_count,
-        type_count=type_count,
-        token_total=token_total,
+    rows, result_count, type_count = await paginate_sql_source(
+        session, source, query, match_mode, sort, direction, limit, offset
     )
+
+    return RankedPage(rows=rows, result_count=result_count, type_count=type_count, token_total=token_total)

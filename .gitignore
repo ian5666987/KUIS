@@ -16,3 +16,7 @@ venv/
 # Django static/media
 staticfiles/
 media/
+
+# Redis (local worker dev — dropped into the cwd when redis-server runs
+# without an explicit --dir)
+dump.rdb

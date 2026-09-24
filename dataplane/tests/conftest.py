@@ -61,6 +61,7 @@ def seeded_corpus():
     call_command("migrate", "--noinput", verbosity=0)
 
     from main.models import Corpus, Document
+    from worker.tasks.indexing import index_document
 
     Document.objects.all().delete()
     Corpus.objects.all().delete()
@@ -69,6 +70,15 @@ def seeded_corpus():
     plain = Document.objects.create(title="plain.txt", content=PLAIN_TEXT)
     corpus = Corpus.objects.create(name="Test corpus")
     corpus.documents.set([annotated, plain])
+
+    # Tokenization (and Tier-2 aggregate computation) is no longer automatic
+    # on save (architecture plan §5 removed the post_save signal) — .delay()
+    # runs synchronously because CELERY_TASK_ALWAYS_EAGER=1 is set for this
+    # test run, exercising the real indexing + aggregate tasks rather than a
+    # hand-rolled test-only setup path that could drift from what
+    # production actually populates.
+    index_document.delay(annotated.id)
+    index_document.delay(plain.id)
 
     return {"corpus_id": corpus.id, "doc1_id": annotated.id, "doc2_id": plain.id}
 

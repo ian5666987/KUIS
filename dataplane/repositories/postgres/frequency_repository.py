@@ -1,11 +1,13 @@
-"""Ports main/views.py::word_frequency (_count_words(size=1) + _rank_counter)
-onto SQL — see _ranked_query.py for the shared implementation; this is the
-n=1 case."""
+"""Ports main/views.py::word_frequency onto SQL. Phase 5: swapped onto
+Tier-2's DocumentWordFreq (via _aggregate_query.py) instead of Tier-0's raw
+self-join (_ranked_query.py) — the repository-swap the architecture plan's
+whole layering exists to make invisible above this file. FrequencyService,
+the router, and Next.js needed zero changes for this swap."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import FrequencyRepository, MatchMode, Mode, RankedPage, SortDirection
-from dataplane.repositories.postgres._ranked_query import compute_ranked_page
+from dataplane.repositories.postgres._aggregate_query import compute_word_freq_page
 
 
 class PostgresFrequencyRepository(FrequencyRepository):
@@ -23,6 +25,6 @@ class PostgresFrequencyRepository(FrequencyRepository):
         limit: int,
         offset: int,
     ) -> RankedPage:
-        return await compute_ranked_page(
-            self._session, document_ids, mode, 1, query, match_mode, sort, direction, limit, offset
+        return await compute_word_freq_page(
+            self._session, document_ids, mode, query, match_mode, sort, direction, limit, offset
         )

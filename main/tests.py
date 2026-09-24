@@ -13,6 +13,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import Corpus, Document
+from worker.tasks.indexing import index_document
 
 CORPUS_XML = """<document>
   <header><textfile>sample</textfile><lang>indonesian</lang></header>
@@ -34,6 +35,15 @@ class ExplorerTestCase(TestCase):
 
         cls.annotated = Document.objects.create(title='annotated.xml', content=CORPUS_XML)
         cls.plain = Document.objects.create(title='plain.txt', content=PLAIN_TEXT)
+        # Tokenization is no longer automatic on save (architecture plan
+        # §5 removed the post_save signal) — .delay() runs synchronously
+        # here because CELERY_TASK_ALWAYS_EAGER=1 is set for this test run
+        # (see docs/ONBOARDING.md's test command), exercising the real
+        # indexing task rather than a hand-rolled test-only setup path.
+        index_document.delay(cls.annotated.id)
+        index_document.delay(cls.plain.id)
+        cls.annotated.refresh_from_db()
+        cls.plain.refresh_from_db()
 
         cls.corpus = Corpus.objects.create(name='Written 2023', description='Essays')
         cls.corpus.documents.set([cls.annotated, cls.plain])
@@ -459,3 +469,83 @@ class CorpusApiTests(ExplorerTestCase):
         self.assertEqual(empty['document_count'], 0)
         self.assertEqual(empty['token_total'], 0)
         self.assertEqual(empty['token_total_corrected'], 0)
+
+
+class WorkerTaskTests(TestCase):
+    """worker/tasks/indexing.py + aggregates.py (architecture plan §5) —
+    the async replacement for the old post_save signal. Called directly
+    (not .delay()) in most of these since the point is testing the task
+    BODY; test_runs_synchronously_end_to_end_via_delay below is the one
+    test that goes through .delay() itself, confirming CELERY_TASK_ALWAYS_
+    EAGER actually does what every other test in this file assumes."""
+
+    def test_index_document_builds_tokens_and_marks_ready(self):
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        self.assertEqual(doc.status, Document.STATUS_READY)  # model default, not yet indexed
+        self.assertEqual(doc.tokens.count(), 0)
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertEqual(doc.token_count, 10)  # saya suka makan nasi tapi saya tidak suka nasi goreng
+        self.assertTrue(doc.tokens.filter(mode='original').exists())
+        self.assertIsNotNone(doc.content_hash)
+        self.assertEqual(doc.content_hash, doc.tokenized_hash)
+        self.assertEqual(doc.tokenizer_version, 1)
+
+    def test_index_document_resolves_word_type_correctly(self):
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        index_document(doc.id)
+
+        first_token = doc.tokens.filter(mode='original', position=0).get()
+        self.assertEqual(first_token.word_type.form, 'saya')
+
+        # Corrected stream substitutes the segment's Correction attribute —
+        # same rule main/corpus_parsing.py has always implemented, now
+        # reached through word_type instead of a `word` column.
+        corrected_forms = list(
+            doc.tokens.filter(mode='corrected').order_by('position').values_list('word_type__form', flat=True)
+        )
+        self.assertIn('tetapi', corrected_forms)
+        self.assertNotIn('tapi', corrected_forms)
+
+    def test_reindexing_replaces_rather_than_duplicates_tokens(self):
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        index_document(doc.id)
+        first_count = doc.tokens.count()
+
+        index_document(doc.id)  # same content, run again
+
+        self.assertEqual(doc.tokens.count(), first_count)
+
+    def test_aggregate_tasks_populate_document_word_freq_and_ngram(self):
+        from .models import DocumentNgram, DocumentWordFreq
+
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        index_document(doc.id)  # chains both aggregate tasks internally
+
+        word_freqs = DocumentWordFreq.objects.filter(document=doc, mode='original')
+        self.assertTrue(word_freqs.exists())
+        saya_freq = word_freqs.get(word_type__form='saya')
+        self.assertEqual(saya_freq.count, 2)  # "saya" appears twice in CORPUS_XML's original stream
+
+        ngrams = DocumentNgram.objects.filter(document=doc, mode='original', n=2)
+        self.assertTrue(ngrams.exists())
+
+    def test_runs_synchronously_end_to_end_via_delay(self):
+        # This is the one test in the file that goes through .delay() itself
+        # rather than calling the task body directly — every OTHER test
+        # fixture in this file (ExplorerTestCase.setUpTestData) relies on
+        # .delay() behaving synchronously under CELERY_TASK_ALWAYS_EAGER=1,
+        # so this pins that assumption explicitly instead of leaving it
+        # implicit.
+        from .models import DocumentWordFreq
+
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        index_document.delay(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertTrue(doc.tokens.exists())
+        self.assertTrue(DocumentWordFreq.objects.filter(document=doc).exists())

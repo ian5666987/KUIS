@@ -21,11 +21,29 @@ django.setup()
 
 import pytest  # noqa: E402
 
-from dataplane.models.tables import corpus, corpus_documents, document, token  # noqa: E402
+from dataplane.models.tables import (  # noqa: E402
+    corpus,
+    corpus_documents,
+    document,
+    document_ngram,
+    document_word_freq,
+    token,
+    word_type,
+)
 
 
 def _django_columns(model) -> set[str]:
     return {f.column for f in model._meta.get_fields() if getattr(f, "column", None)}
+
+
+SA_TABLES = {
+    "document": document,
+    "corpus": corpus,
+    "token": token,
+    "word_type": word_type,
+    "document_word_freq": document_word_freq,
+    "document_ngram": document_ngram,
+}
 
 
 @pytest.mark.parametrize(
@@ -34,6 +52,9 @@ def _django_columns(model) -> set[str]:
         ("document", "main.models.Document", "main_document"),
         ("corpus", "main.models.Corpus", "main_corpus"),
         ("token", "main.models.Token", "main_token"),
+        ("word_type", "main.models.WordType", "main_wordtype"),
+        ("document_word_freq", "main.models.DocumentWordFreq", "main_documentwordfreq"),
+        ("document_ngram", "main.models.DocumentNgram", "main_documentngram"),
     ],
 )
 def test_table_name_and_columns_match_django(sa_table, django_model_path, django_table_name):
@@ -44,7 +65,7 @@ def test_table_name_and_columns_match_django(sa_table, django_model_path, django
 
     assert django_model._meta.db_table == django_table_name
 
-    sa_table_obj = {"document": document, "corpus": corpus, "token": token}[sa_table]
+    sa_table_obj = SA_TABLES[sa_table]
     sa_columns = {c.name for c in sa_table_obj.columns}
     django_columns = _django_columns(django_model)
 

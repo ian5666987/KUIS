@@ -22,6 +22,14 @@ from .models import Token, Document, Corpus
 from .corpus_parsing import parse_document
 from collections import Counter
 
+# Explicit async indexing (architecture plan §5, Phase 5) — replaces the
+# post_save signal main/models.py used to build tokens synchronously.
+# Imported here rather than at call sites since every document-creating
+# view below needs it. worker.celery_app calls django.setup() as an import
+# side effect, same as manage.py does — safe to call again here since
+# Django's own apps.populate() is a no-op once already ready.
+from worker.tasks.indexing import index_document
+
 #For document uploading
 from .forms import CorpusForm, DocumentForm
 
@@ -281,7 +289,8 @@ def corpus_create(request):
             corpus.save()
 
             for doc in new_documents:
-                doc.save()  # post_save signal builds this document's Token rows
+                doc.save()
+                index_document.delay(doc.id)  # async — see architecture plan §5
 
             corpus.documents.set(list(form.cleaned_data['documents']) + new_documents)
 
@@ -348,6 +357,7 @@ def corpus_edit(request, corpus_id):
 
             for doc in new_documents:
                 doc.save()
+                index_document.delay(doc.id)  # async — see architecture plan §5
 
             corpus.documents.set(list(form.cleaned_data['documents']) + new_documents)
 
@@ -775,6 +785,7 @@ def upload_document(request):
                     return render(request, 'main/upload_document.html', {'form': form})
 
             doc.save()
+            index_document.delay(doc.id)  # async — see architecture plan §5
 
             messages.success(
                 request,
@@ -933,7 +944,13 @@ def kwic_export_csv(request):
 
 def _word_index_matches(documents, word, mode):
     """(document_id, position) for every hit, in corpus order. Cheap to page
-    over: nothing is hydrated until a page is actually rendered."""
+    over: nothing is hydrated until a page is actually rendered.
+
+    Filters on word_type__form rather than a `word` column on Token itself
+    — architecture plan §2/Phase 5's Tier 1 normalization replaced that
+    column with a WordType FK. The join is transparent here; Django
+    resolves `word_type__form` the same way regardless of which side of
+    the FK the value lives on."""
     if not word:
         return []
 
@@ -941,7 +958,7 @@ def _word_index_matches(documents, word, mode):
 
     return list(
         Token.objects
-        .filter(word=word, mode=mode, document_id__in=doc_ids)
+        .filter(word_type__form=word, mode=mode, document_id__in=doc_ids)
         .order_by('document_id', 'position')
         .values_list('document_id', 'position')
     )
@@ -961,7 +978,7 @@ def _hydrate_word_index(refs, mode, window):
             Token.objects
             .filter(document_id=doc_id, mode=mode)
             .order_by('position')
-            .values_list('word', flat=True)
+            .values_list('word_type__form', flat=True)
         )
         for doc_id in doc_ids
     }

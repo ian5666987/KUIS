@@ -13,6 +13,12 @@ jobs:
       DB_NAME: ":memory:"
       SECRET_KEY: ci-test-key-not-for-production
       JWT_SECRET: ci-test-jwt-secret-not-for-production
+      # Phase 5 removed the post_save signal that used to tokenize a
+      # Document synchronously on save — main/tests.py's fixtures now call
+      # worker.tasks.indexing.index_document.delay(...) explicitly, which
+      # needs eager mode to run synchronously without a real Redis broker
+      # (confirmed: eager mode makes zero broker connections at all).
+      CELERY_TASK_ALWAYS_EAGER: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,6 +65,11 @@ jobs:
       DB_NAME: kuis_dataplane_test
       SECRET_KEY: ci-test-key-not-for-production
       JWT_SECRET: ci-test-jwt-secret-not-for-production
+      # seeded_corpus (conftest.py) calls index_document.delay(...) to
+      # populate Token/DocumentWordFreq/DocumentNgram — see django-tests'
+      # own CELERY_TASK_ALWAYS_EAGER comment above for why this needs no
+      # Redis service here.
+      CELERY_TASK_ALWAYS_EAGER: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,8 +84,6 @@ jobs:
       # clearer failure point if migrations themselves are broken.
       - run: python manage.py migrate --noinput
       - run: python -m pytest dataplane/tests -v
-      # Phase 5 onward, this is also where the dataplane/models/tables.py <->
-      # Django-schema drift check from the architecture plan §2 should run.
 
   worker-import-check:
     runs-on: ubuntu-latest
