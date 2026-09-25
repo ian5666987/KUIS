@@ -42,6 +42,22 @@ class SortDirection(str, Enum):
     DESC = "desc"
 
 
+class KwicSort(str, Enum):
+    """Mirrors main/views.py::KWIC_SORTS from the legacy `kwic` view —
+    restored to the merged FastAPI KWIC endpoint (KUIS-FE's "KWIC (Legacy)"
+    page) after having been dropped in the original Phase 2 merge. `CENTER`
+    (corpus/document order) is the only one that stays fully SQL-paginated;
+    the other three need the whole match set assembled before they can be
+    sorted (see PostgresKWICRepository.search's docstring) — same
+    in-memory-sort-before-paginate shape the legacy view always had, just
+    against the indexed Token table instead of a live re-parse."""
+
+    CENTER = "center"
+    LEFT = "left"
+    RIGHT = "right"
+    DOCUMENT = "document"
+
+
 # --- KWIC --------------------------------------------------------------
 # The one interface Phase 2 actually implements and proves against data.
 
@@ -59,7 +75,8 @@ class KWICRepository(ABC):
     """`words` is a phrase (list, not a single string) deliberately — see
     architecture plan §4: extending the fast (Token-table) path to accept a
     phrase makes it a strict superset of legacy `kwic`'s live-parsed phrase
-    search, so no separate port of that view is needed."""
+    search, so no separate port of that view is needed. `sort` restores
+    legacy `kwic`'s sort-by-position control (see KwicSort)."""
 
     @abstractmethod
     async def search(
@@ -70,6 +87,7 @@ class KWICRepository(ABC):
         window: int,
         limit: int,
         offset: int,
+        sort: KwicSort = KwicSort.CENTER,
     ) -> list[KWICHit]: ...
 
     @abstractmethod

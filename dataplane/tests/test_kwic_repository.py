@@ -11,7 +11,7 @@ with test_ranked_query.py and the Phase 4 router tests, once a third file
 needed the same trio this file originally defined alone).
 """
 
-from dataplane.repositories.base import Mode
+from dataplane.repositories.base import KwicSort, Mode
 from dataplane.repositories.postgres.kwic_repository import PostgresKWICRepository
 
 
@@ -105,3 +105,68 @@ class TestCorrectedMode:
         assert hits[0].document_id == seeded_corpus["doc1_id"]
         assert hits[0].left == ["makan", "nasi", "goreng"]
         assert hits[0].right == ["saya", "tidak", "suka"]
+
+
+class TestSort:
+    """KwicSort restores main/views.py::_sort_kwic's four sort modes to the
+    merged FastAPI KWIC endpoint. CENTER stays SQL-paginated (proven
+    unchanged by TestSingleWordSearch/TestPhraseSearch above, all of which
+    call search() without a sort= arg and so exercise the default); the
+    other three need the whole match set assembled before pagination — see
+    search()'s docstring."""
+
+    async def test_sort_left_orders_by_immediate_left_neighbor(self, session, document_ids):
+        # window=1 so left/right are single-element lists — isolates the
+        # sort key exactly, matching _sort_kwic's `left[-1]`.
+        repo = PostgresKWICRepository(session)
+        hits = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=1, limit=50, offset=0, sort=KwicSort.LEFT
+        )
+        lefts = [h.left[0] if h.left else "" for h in hits]
+        assert lefts == sorted(lefts)
+        assert lefts[0] == "makan"  # the one "nasi" preceded by "makan", not "suka"
+
+    async def test_sort_right_orders_by_immediate_right_neighbor(self, session, document_ids):
+        # "suka" (not "nasi") so the immediate right neighbor actually
+        # varies across occurrences — every "nasi" here is followed by
+        # "goreng", which wouldn't discriminate the sort.
+        repo = PostgresKWICRepository(session)
+        hits = await repo.search(
+            document_ids, ["suka"], Mode.ORIGINAL, window=1, limit=50, offset=0, sort=KwicSort.RIGHT
+        )
+        rights = [h.right[0] if h.right else "" for h in hits]
+        assert rights == sorted(rights)
+        assert rights[0] == "makan"  # "suka makan" sorts before every "suka nasi"
+
+    async def test_sort_document_groups_hits_by_title(self, seeded_corpus, session, document_ids):
+        repo = PostgresKWICRepository(session)
+        hits = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=1, limit=50, offset=0, sort=KwicSort.DOCUMENT
+        )
+        titles = [h.document_title for h in hits]
+        assert titles == sorted(titles)
+        assert set(titles) == {"annotated.xml", "plain.txt"}
+
+    async def test_sort_left_pagination_has_no_gaps_or_overlap(self, session, document_ids):
+        # Same shape as TestSingleWordSearch::test_pagination_splits_results
+        # _without_gaps_or_overlap, but for a sort mode that can't paginate
+        # in SQL — proves the fetch-all-then-slice path is still gapless.
+        repo = PostgresKWICRepository(session)
+        page1 = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=1, limit=2, offset=0, sort=KwicSort.LEFT
+        )
+        page2 = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=1, limit=2, offset=2, sort=KwicSort.LEFT
+        )
+        full = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=1, limit=50, offset=0, sort=KwicSort.LEFT
+        )
+        assert page1 + page2 == full
+
+    async def test_center_is_the_default_when_sort_is_omitted(self, session, document_ids):
+        repo = PostgresKWICRepository(session)
+        with_default = await repo.search(document_ids, ["nasi"], Mode.ORIGINAL, window=2, limit=50, offset=0)
+        explicit_center = await repo.search(
+            document_ids, ["nasi"], Mode.ORIGINAL, window=2, limit=50, offset=0, sort=KwicSort.CENTER
+        )
+        assert with_default == explicit_center

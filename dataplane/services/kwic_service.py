@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataplane.repositories.base import KWICHit, KWICRepository, Mode
+from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, Mode
 from dataplane.repositories.shared import resolve_document_ids
 from dataplane.services.pagination import normalize_per_page
 
@@ -30,6 +30,7 @@ class KWICSearchResult:
     window: int  # the CLAMPED window actually used, not necessarily what was requested
     page: int
     per_page: int
+    sort: KwicSort
 
 
 class KWICService:
@@ -49,6 +50,7 @@ class KWICService:
         window: int,
         page: int,
         per_page: int,
+        sort: KwicSort = KwicSort.CENTER,
     ) -> KWICSearchResult:
         window = self._clamp_window(window)
         per_page = normalize_per_page(per_page)
@@ -60,10 +62,10 @@ class KWICService:
         document_ids = await resolve_document_ids(self._session, corpus_ids)
 
         if not document_ids or not words:
-            return KWICSearchResult(hits=[], total=0, window=window, page=page, per_page=per_page)
+            return KWICSearchResult(hits=[], total=0, window=window, page=page, per_page=per_page, sort=sort)
 
         offset = (page - 1) * per_page
-        hits = await self._repository.search(document_ids, words, mode, window, per_page, offset)
+        hits = await self._repository.search(document_ids, words, mode, window, per_page, offset, sort)
         total = await self._repository.count_matches(document_ids, words, mode)
 
-        return KWICSearchResult(hits=hits, total=total, window=window, page=page, per_page=per_page)
+        return KWICSearchResult(hits=hits, total=total, window=window, page=page, per_page=per_page, sort=sort)

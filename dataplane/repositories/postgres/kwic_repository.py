@@ -29,7 +29,14 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.models.tables import document, token, word_type
-from dataplane.repositories.base import KWICHit, KWICRepository, Mode
+from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, Mode
+
+# Safety bound for sort=left/right/document, which need the full match set
+# assembled in memory before it can be sorted (see search()'s docstring) —
+# not a real product limit, just a guard against a pathological corpus
+# selection hanging a request. sort=center (the default) is unaffected and
+# stays fully SQL-paginated regardless of result size.
+MAX_UNPAGINATED_MATCHES = 10_000
 
 
 class PostgresKWICRepository(KWICRepository):
@@ -83,29 +90,16 @@ class PostgresKWICRepository(KWICRepository):
         result = await self._session.execute(select(func.count()).select_from(subquery))
         return result.scalar_one()
 
-    async def search(
-        self,
-        document_ids: list[int],
-        words: list[str],
-        mode: Mode,
-        window: int,
-        limit: int,
-        offset: int,
+    async def _hydrate_hits(
+        self, hit_positions: list, words: list[str], mode: Mode, window: int
     ) -> list[KWICHit]:
-        if not document_ids or not words:
-            return []
-
-        matches, base = self._match_query(document_ids, words, mode)
-        page_query = matches.order_by(base.c.document_id, base.c.position).limit(limit).offset(offset)
-        hit_positions = (await self._session.execute(page_query)).all()
-
-        if not hit_positions:
-            return []
-
+        """Turns (document_id, position) match rows into full KWICHit
+        objects — the context-window + title hydration shared by every
+        sort mode. Batches every hit's context window into ONE query
+        instead of one per hit (fixes defect #3) or loading whole
+        documents (fixes defect #4)."""
         n = len(words)
 
-        # Batch every hit's context window into ONE query instead of one per
-        # hit (fixes defect #3) or loading whole documents (fixes defect #4).
         range_clauses = [
             and_(
                 token.c.document_id == doc_id,
@@ -150,3 +144,53 @@ class PostgresKWICRepository(KWICRepository):
             )
 
         return hits
+
+    async def search(
+        self,
+        document_ids: list[int],
+        words: list[str],
+        mode: Mode,
+        window: int,
+        limit: int,
+        offset: int,
+        sort: KwicSort = KwicSort.CENTER,
+    ) -> list[KWICHit]:
+        if not document_ids or not words:
+            return []
+
+        matches, base = self._match_query(document_ids, words, mode)
+
+        if sort == KwicSort.CENTER:
+            # Corpus/document order — the only sort that needs nothing but
+            # the page itself, so it stays fully SQL-paginated (real
+            # LIMIT/OFFSET, defect #3's fix untouched).
+            page_query = matches.order_by(base.c.document_id, base.c.position).limit(limit).offset(offset)
+            hit_positions = (await self._session.execute(page_query)).all()
+            if not hit_positions:
+                return []
+            return await self._hydrate_hits(hit_positions, words, mode, window)
+
+        # left/right/document: the sort key (the adjacent word, or the
+        # document title) only exists once a hit's context/title is
+        # hydrated — which happens after the match query, not before. So
+        # unlike `center`, this can't paginate in SQL first: fetch every
+        # match (capped at MAX_UNPAGINATED_MATCHES), hydrate all of them,
+        # sort, then slice — the same in-memory sort-before-paginate shape
+        # main/views.py::_sort_kwic always used, just over indexed data.
+        all_query = matches.order_by(base.c.document_id, base.c.position).limit(MAX_UNPAGINATED_MATCHES)
+        hit_positions = (await self._session.execute(all_query)).all()
+        if not hit_positions:
+            return []
+
+        hits = await self._hydrate_hits(hit_positions, words, mode, window)
+
+        if sort == KwicSort.LEFT:
+            # The single word immediately left of the match — main/views.py
+            # ::_sort_kwic's `x["left"][-1] if x["left"] else ""`.
+            hits.sort(key=lambda h: h.left[-1] if h.left else "")
+        elif sort == KwicSort.RIGHT:
+            hits.sort(key=lambda h: h.right[0] if h.right else "")
+        elif sort == KwicSort.DOCUMENT:
+            hits.sort(key=lambda h: h.document_title)
+
+        return hits[offset : offset + limit]

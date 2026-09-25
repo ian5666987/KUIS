@@ -85,3 +85,40 @@ def test_unknown_corpus_id_returns_empty_results_not_an_error(client, auth_heade
     response = client.get("/api/v1/kwic", params={"corpus_ids": [999999], "q": "nasi"}, headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["result_count"] == 0
+
+
+def test_sort_defaults_to_center(client, auth_headers, seeded_corpus):
+    response = client.get(
+        "/api/v1/kwic",
+        params={"corpus_ids": [seeded_corpus["corpus_id"]], "q": "nasi"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["sort"] == "center"
+
+
+def test_sort_document_orders_results_by_document_title(client, auth_headers, seeded_corpus):
+    response = client.get(
+        "/api/v1/kwic",
+        params={"corpus_ids": [seeded_corpus["corpus_id"]], "q": "nasi", "window": 1, "sort": "document"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sort"] == "document"
+    titles = [hit["document_title"] for hit in body["results"]]
+    assert titles == sorted(titles)
+
+
+def test_invalid_sort_is_a_validation_error(client, auth_headers, seeded_corpus):
+    # Declared as the KwicSort enum, not a plain str — an unrecognized
+    # value is rejected (422), unlike main/views.py::_sort_kwic's silent
+    # fallback to "center" for any unrecognized string (see
+    # dataplane/routers/kwic.py's module docstring for why that's not
+    # reproduced here).
+    response = client.get(
+        "/api/v1/kwic",
+        params={"corpus_ids": [seeded_corpus["corpus_id"]], "q": "nasi", "sort": "not-a-real-sort"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
