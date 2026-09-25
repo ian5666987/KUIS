@@ -9,6 +9,7 @@ export) agreeing with each other.
 import json
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
@@ -799,3 +800,130 @@ class DocumentApiTests(ExplorerTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('file', response.json())
         self.assertFalse(Document.objects.filter(title='Bad file').exists())
+
+
+class AccountApiTests(TestCase):
+    """main/api_account.py (architecture plan §6, KUIS-FE rebuild) —
+    self-registration and the contact form, both previously
+    server-rendered-only. Both reuse main/forms.py's RegisterForm/
+    ContactForm directly, so these tests mostly pin the API-specific parts
+    (response shape, status codes, error-key normalization) rather than
+    re-testing validation rules the forms already own."""
+
+    def test_register_creates_user_and_returns_tokens(self):
+        response = self.client.post(
+            reverse('api_register'),
+            data=json.dumps({
+                'username': 'newresearcher',
+                'email': 'newresearcher@example.com',
+                'password1': 'Xk9mQpLv2zR7',
+                'password2': 'Xk9mQpLv2zR7',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+
+        body = response.json()
+        self.assertIn('access', body)
+        self.assertIn('refresh', body)
+        self.assertTrue(User.objects.filter(username='newresearcher').exists())
+
+    def test_register_rejects_duplicate_email(self):
+        User.objects.create_user('existing', email='taken@example.com', password='pw-for-tests-1')
+
+        response = self.client.post(
+            reverse('api_register'),
+            data=json.dumps({
+                'username': 'someoneelse',
+                'email': 'taken@example.com',
+                'password1': 'Xk9mQpLv2zR7',
+                'password2': 'Xk9mQpLv2zR7',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('email', response.json())
+        self.assertFalse(User.objects.filter(username='someoneelse').exists())
+
+    def test_register_rejects_mismatched_passwords(self):
+        response = self.client.post(
+            reverse('api_register'),
+            data=json.dumps({
+                'username': 'mismatched',
+                'email': 'mismatched@example.com',
+                'password1': 'Xk9mQpLv2zR7',
+                'password2': 'DifferentPass9',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        # Django's UserCreationForm reports this on password2, not '__all__'
+        # — no normalization needed, just confirming the field key survives.
+        self.assertIn('password2', response.json())
+        self.assertFalse(User.objects.filter(username='mismatched').exists())
+
+    def test_contact_sends_email(self):
+        response = self.client.post(
+            reverse('api_contact'),
+            data=json.dumps({
+                'name': 'A visitor',
+                'email': 'visitor@example.com',
+                'message': 'Hello there',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('A visitor', mail.outbox[0].body)
+        self.assertIn('Hello there', mail.outbox[0].body)
+
+    def test_contact_requires_all_fields(self):
+        response = self.client.post(
+            reverse('api_contact'),
+            data=json.dumps({'name': 'A visitor'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(len(mail.outbox), 0)
+
+
+class ProfileApiTests(TestCase):
+    """GET /api/profile/ (main/api_account.py) — mirrors profile.html."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            'researcher', email='researcher@example.com', password='pw-for-tests-1'
+        )
+
+    def auth_headers(self):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': 'researcher', 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        access = response.json()['access']
+        return {'HTTP_AUTHORIZATION': f'Bearer {access}'}
+
+    def test_anonymous_cannot_view_profile(self):
+        response = self.client.get(reverse('api_profile'))
+        self.assertEqual(response.status_code, 401)
+
+    def test_profile_reports_own_counts_only(self):
+        other = User.objects.create_user('other', password='pw-for-tests-1')
+
+        Document.objects.create(title='mine.xml', content='saya suka teh', user=self.user)
+        Document.objects.create(title='mine2.xml', content='saya suka teh', user=self.user)
+        Document.objects.create(title='theirs.xml', content='saya suka teh', user=other)
+
+        Corpus.objects.create(name='Mine', created_by=self.user)
+        Corpus.objects.create(name='Theirs', created_by=other)
+
+        response = self.client.get(reverse('api_profile'), **self.auth_headers())
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body['username'], 'researcher')
+        self.assertEqual(body['email'], 'researcher@example.com')
+        self.assertFalse(body['is_staff'])
+        self.assertEqual(body['documents_uploaded'], 2)
+        self.assertEqual(body['corpora_created'], 1)

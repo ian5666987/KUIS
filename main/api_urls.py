@@ -9,6 +9,7 @@ that, not anymore.
 from django.urls import path
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenRefreshView
 
+from .api_account import ContactView, ProfileView, RegisterView
 from .api_auth import KUISTokenObtainPairView
 from .api_corpus import CorpusAssignView, CorpusDetailView, CorpusListView
 from .api_documents import DocumentListView, DocumentUploadView
@@ -17,6 +18,9 @@ urlpatterns = [
     path("auth/token/", KUISTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/token/blacklist/", TokenBlacklistView.as_view(), name="token_blacklist"),
+    path("auth/register/", RegisterView.as_view(), name="api_register"),
+    path("contact/", ContactView.as_view(), name="api_contact"),
+    path("profile/", ProfileView.as_view(), name="api_profile"),
     path("corpora/", CorpusListView.as_view(), name="api_corpus_list"),
     path("corpora/assign/", CorpusAssignView.as_view(), name="api_corpus_assign"),
     path("corpora/<int:pk>/", CorpusDetailView.as_view(), name="api_corpus_detail"),
