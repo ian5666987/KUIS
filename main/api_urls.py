@@ -10,11 +10,16 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenRefreshView
 
 from .api_auth import KUISTokenObtainPairView
-from .api_corpus import CorpusListView
+from .api_corpus import CorpusAssignView, CorpusDetailView, CorpusListView
+from .api_documents import DocumentListView, DocumentUploadView
 
 urlpatterns = [
     path("auth/token/", KUISTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/token/blacklist/", TokenBlacklistView.as_view(), name="token_blacklist"),
     path("corpora/", CorpusListView.as_view(), name="api_corpus_list"),
+    path("corpora/assign/", CorpusAssignView.as_view(), name="api_corpus_assign"),
+    path("corpora/<int:pk>/", CorpusDetailView.as_view(), name="api_corpus_detail"),
+    path("documents/", DocumentListView.as_view(), name="api_document_list"),
+    path("documents/upload/", DocumentUploadView.as_view(), name="api_document_upload"),
 ]

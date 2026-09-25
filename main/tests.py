@@ -9,6 +9,7 @@ export) agreeing with each other.
 import json
 
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
@@ -549,3 +550,252 @@ class WorkerTaskTests(TestCase):
         self.assertEqual(doc.status, Document.STATUS_READY)
         self.assertTrue(doc.tokens.exists())
         self.assertTrue(DocumentWordFreq.objects.filter(document=doc).exists())
+
+
+class CorpusCrudApiTests(ExplorerTestCase):
+    """Write endpoints for main/api_corpus.py (architecture plan §6, Phase
+    6) — POST/PATCH/DELETE /api/corpora/, POST /api/corpora/assign/. Read
+    parity is already covered by CorpusApiTests above; this covers the RBAC
+    gate (admin-only writes — same rule as main/views.py::staff_required)
+    and the same validation main/forms.py::CorpusForm already enforces."""
+
+    def auth_headers(self, username='researcher'):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        access = response.json()['access']
+        return {'HTTP_AUTHORIZATION': f'Bearer {access}'}
+
+    def test_anonymous_cannot_create_a_corpus(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': 'New corpus', 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_non_staff_cannot_create_a_corpus(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': 'New corpus', 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Corpus.objects.filter(name='New corpus').exists())
+
+    def test_staff_can_create_a_corpus_with_existing_documents(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': 'New corpus', 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+
+        body = response.json()
+        self.assertEqual(body['name'], 'New corpus')
+        self.assertEqual(body['document_count'], 1)
+        self.assertEqual([d['id'] for d in body['documents']], [self.plain.id])
+
+    def test_create_rejects_duplicate_name(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': self.corpus.name, 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('name', response.json())
+
+    def test_create_requires_at_least_one_document_or_file(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': 'Empty attempt'}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('non_field_errors', response.json())
+
+    def test_create_with_uploaded_file_indexes_it(self):
+        upload = SimpleUploadedFile('new.txt', b'saya suka teh', content_type='text/plain')
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data={'name': 'File corpus', 'files': [upload]},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['document_count'], 1)
+
+        new_doc = Document.objects.get(title='new.txt')
+        # CELERY_TASK_ALWAYS_EAGER=1 — .delay() already ran synchronously.
+        self.assertEqual(new_doc.status, Document.STATUS_READY)
+        self.assertTrue(new_doc.tokens.exists())
+
+    def test_create_rejects_non_utf8_file(self):
+        upload = SimpleUploadedFile('bad.txt', b'\xff\xfe', content_type='text/plain')
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data={'name': 'Bad file corpus', 'files': [upload]},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('files', response.json())
+        self.assertFalse(Corpus.objects.filter(name='Bad file corpus').exists())
+
+    def test_any_authenticated_user_can_retrieve_corpus_detail(self):
+        response = self.client.get(
+            reverse('api_corpus_detail', args=[self.corpus.id]),
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body['document_count'], 2)
+        self.assertEqual({d['id'] for d in body['documents']}, {self.annotated.id, self.plain.id})
+
+    def test_staff_can_update_a_corpus_replacing_membership(self):
+        response = self.client.patch(
+            reverse('api_corpus_detail', args=[self.corpus.id]),
+            data=json.dumps({
+                'name': self.corpus.name,
+                'description': 'updated',
+                'document_ids': [self.plain.id],  # drops self.annotated
+            }),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.corpus.refresh_from_db()
+        self.assertEqual(list(self.corpus.documents.values_list('id', flat=True)), [self.plain.id])
+        self.assertEqual(self.corpus.description, 'updated')
+
+    def test_non_staff_cannot_update_a_corpus(self):
+        response = self.client.patch(
+            reverse('api_corpus_detail', args=[self.corpus.id]),
+            data=json.dumps({'name': self.corpus.name, 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.corpus.documents.count(), 2)  # unchanged
+
+    def test_staff_can_delete_a_corpus_but_documents_survive(self):
+        corpus_id = self.other.id
+        response = self.client.delete(
+            reverse('api_corpus_detail', args=[corpus_id]),
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Corpus.objects.filter(id=corpus_id).exists())
+        self.assertTrue(Document.objects.filter(id=self.plain.id).exists())
+
+    def test_non_staff_cannot_delete_a_corpus(self):
+        response = self.client.delete(
+            reverse('api_corpus_detail', args=[self.other.id]),
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Corpus.objects.filter(id=self.other.id).exists())
+
+    def test_assign_is_additive_and_staff_only(self):
+        # self.plain already belongs to both self.corpus and self.other;
+        # self.annotated belongs only to self.corpus.
+        response = self.client.post(
+            reverse('api_corpus_assign'),
+            data=json.dumps({'document_ids': [self.annotated.id], 'corpus_ids': [self.other.id]}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['added'], 1)
+        self.assertIn(self.annotated, self.other.documents.all())
+        self.assertIn(self.plain, self.corpus.documents.all())  # unrelated membership untouched
+
+    def test_non_staff_cannot_assign(self):
+        response = self.client.post(
+            reverse('api_corpus_assign'),
+            data=json.dumps({'document_ids': [self.annotated.id], 'corpus_ids': [self.other.id]}),
+            content_type='application/json',
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn(self.annotated, self.other.documents.all())
+
+
+class DocumentApiTests(ExplorerTestCase):
+    """main/api_documents.py (architecture plan §6, Phase 6) — document
+    listing + upload over the API."""
+
+    def auth_headers(self, username='researcher'):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        access = response.json()['access']
+        return {'HTTP_AUTHORIZATION': f'Bearer {access}'}
+
+    def test_any_authenticated_user_can_list_documents(self):
+        response = self.client.get(reverse('api_document_list'), **self.auth_headers('researcher'))
+        self.assertEqual(response.status_code, 200)
+
+        titles = {row['title'] for row in response.json()}
+        self.assertIn('annotated.xml', titles)
+
+    def test_unassigned_filter(self):
+        Document.objects.create(title='loose.txt', content='saya suka teh')
+        response = self.client.get(
+            reverse('api_document_list'), {'unassigned': 'true'}, **self.auth_headers('researcher')
+        )
+
+        titles = {row['title'] for row in response.json()}
+        self.assertIn('loose.txt', titles)
+        self.assertNotIn('annotated.xml', titles)  # belongs to self.corpus
+
+    def test_non_staff_cannot_upload(self):
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data=json.dumps({'title': 'New doc', 'content': 'saya suka teh'}),
+            content_type='application/json',
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Document.objects.filter(title='New doc').exists())
+
+    def test_staff_can_upload_pasted_content_and_it_gets_indexed(self):
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data=json.dumps({'title': 'New doc', 'content': 'saya suka teh'}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+
+        doc = Document.objects.get(title='New doc')
+        self.assertEqual(doc.status, Document.STATUS_READY)  # CELERY_TASK_ALWAYS_EAGER=1
+        self.assertFalse(doc.corpora.exists())  # not attached to any corpus, matching upload_document
+
+    def test_upload_requires_content_or_file(self):
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data=json.dumps({'title': 'Empty doc'}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_rejects_non_utf8_file(self):
+        upload = SimpleUploadedFile('bad.txt', b'\xff\xfe', content_type='text/plain')
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data={'title': 'Bad file', 'file': upload},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('file', response.json())
+        self.assertFalse(Document.objects.filter(title='Bad file').exists())
