@@ -29,6 +29,7 @@ from collections import Counter
 # side effect, same as manage.py does — safe to call again here since
 # Django's own apps.populate() is a no-op once already ready.
 from worker.tasks.indexing import index_document
+from .document_ingest import decode_uploaded_file, get_or_create_document
 
 #For document uploading
 from .forms import CorpusForm, DocumentForm
@@ -256,18 +257,6 @@ def corpus_assign(request):
     return redirect(redirect_to)
 
 
-def _document_from_upload(uploaded_file, user, title=None):
-    """Builds (unsaved) a Document from an uploaded file. Raises UnicodeDecodeError
-    if the file isn't UTF-8, which callers turn into a form error."""
-    content = uploaded_file.read().decode('utf-8')
-
-    return Document(
-        title=title or uploaded_file.name,
-        content=content,
-        user=user
-    )
-
-
 @login_required
 @staff_required
 def corpus_create(request):
@@ -276,8 +265,8 @@ def corpus_create(request):
 
         if form.is_valid():
             try:
-                new_documents = [
-                    _document_from_upload(f, request.user)
+                file_contents = [
+                    (f.name, decode_uploaded_file(f))
                     for f in request.FILES.getlist('files')
                 ]
             except UnicodeDecodeError:
@@ -288,16 +277,24 @@ def corpus_create(request):
             corpus.created_by = request.user
             corpus.save()
 
-            for doc in new_documents:
-                doc.save()
-                index_document.delay(doc.id)  # async — see architecture plan §5
+            resolved_documents = []
+            deduplicated = 0
+            for name, content in file_contents:
+                doc, created = get_or_create_document(title=name, content=content, user=request.user)
+                if created:
+                    index_document.delay(doc.id)  # async — see architecture plan §5
+                else:
+                    deduplicated += 1
+                resolved_documents.append(doc)
 
-            corpus.documents.set(list(form.cleaned_data['documents']) + new_documents)
+            corpus.documents.set(list(form.cleaned_data['documents']) + resolved_documents)
 
-            messages.success(
-                request,
-                f'Corpus "{corpus.name}" created with {corpus.documents.count()} file(s).'
-            )
+            success_message = f'Corpus "{corpus.name}" created with {corpus.documents.count()} file(s).'
+            if deduplicated:
+                success_message += (
+                    f' {deduplicated} already existed and were reused instead of re-uploaded.'
+                )
+            messages.success(request, success_message)
             return redirect('corpus_detail', corpus_id=corpus.id)
     else:
         form = CorpusForm()
@@ -342,8 +339,8 @@ def corpus_edit(request, corpus_id):
 
         if form.is_valid():
             try:
-                new_documents = [
-                    _document_from_upload(f, request.user)
+                file_contents = [
+                    (f.name, decode_uploaded_file(f))
                     for f in request.FILES.getlist('files')
                 ]
             except UnicodeDecodeError:
@@ -355,13 +352,24 @@ def corpus_edit(request, corpus_id):
 
             corpus = form.save()
 
-            for doc in new_documents:
-                doc.save()
-                index_document.delay(doc.id)  # async — see architecture plan §5
+            resolved_documents = []
+            deduplicated = 0
+            for name, content in file_contents:
+                doc, created = get_or_create_document(title=name, content=content, user=request.user)
+                if created:
+                    index_document.delay(doc.id)  # async — see architecture plan §5
+                else:
+                    deduplicated += 1
+                resolved_documents.append(doc)
 
-            corpus.documents.set(list(form.cleaned_data['documents']) + new_documents)
+            corpus.documents.set(list(form.cleaned_data['documents']) + resolved_documents)
 
-            messages.success(request, f'Corpus "{corpus.name}" updated.')
+            success_message = f'Corpus "{corpus.name}" updated.'
+            if deduplicated:
+                success_message += (
+                    f' {deduplicated} file(s) already existed and were reused instead of re-uploaded.'
+                )
+            messages.success(request, success_message)
             return redirect('corpus_detail', corpus_id=corpus.id)
     else:
         form = CorpusForm(instance=corpus)
@@ -767,30 +775,30 @@ def upload_document(request):
         form = DocumentForm(request.POST, request.FILES)
 
         if form.is_valid():
-            doc = form.save(commit=False)
-
-            # Assign user
-            doc.user = request.user
-
-            # Handle file upload
+            title = form.cleaned_data['title']
+            content = form.cleaned_data.get('content') or ''
             uploaded_file = request.FILES.get('file')
 
             if uploaded_file:
                 try:
-                    doc.content = _document_from_upload(
-                        uploaded_file, request.user, title=doc.title
-                    ).content
+                    content = decode_uploaded_file(uploaded_file)
                 except UnicodeDecodeError:
                     form.add_error('file', 'File must be UTF-8 encoded.')
                     return render(request, 'main/upload_document.html', {'form': form})
 
-            doc.save()
-            index_document.delay(doc.id)  # async — see architecture plan §5
-
-            messages.success(
-                request,
-                f'"{doc.title}" uploaded. Add it to a corpus to include it in analyses.'
-            )
+            doc, created = get_or_create_document(title=title, content=content, user=request.user)
+            if created:
+                index_document.delay(doc.id)  # async — see architecture plan §5
+                messages.success(
+                    request,
+                    f'"{doc.title}" uploaded. Add it to a corpus to include it in analyses.'
+                )
+            else:
+                messages.success(
+                    request,
+                    f'"{doc.title}" already exists on the server — reusing it instead of '
+                    'uploading a duplicate. Add it to a corpus to include it in analyses.'
+                )
             return redirect('corpus_dashboard')
     else:
         form = DocumentForm()

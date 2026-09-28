@@ -7,10 +7,13 @@ export) agreeing with each other.
 """
 
 import json
+from io import StringIO
 
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.messages import get_messages
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
@@ -473,6 +476,56 @@ class CorpusApiTests(ExplorerTestCase):
         self.assertEqual(empty['token_total_corrected'], 0)
 
 
+class DocumentIngestTests(TestCase):
+    """main/document_ingest.py (docs/content-hash-dedup.md) — the hash
+    formula used to detect duplicate uploads before a Document row is ever
+    created, and the get_or_create wrapper around it."""
+
+    def test_bom_and_crlf_variants_hash_identically(self):
+        from .document_ingest import compute_content_hash
+
+        plain = compute_content_hash("saya suka teh")
+        with_bom_and_crlf = compute_content_hash("﻿saya suka teh\r\n")
+        self.assertEqual(plain, with_bom_and_crlf)
+
+    def test_trailing_whitespace_does_not_change_the_hash(self):
+        from .document_ingest import compute_content_hash
+
+        self.assertEqual(
+            compute_content_hash("saya suka teh"),
+            compute_content_hash("  saya suka teh   \n\n"),
+        )
+
+    def test_xml_attribute_order_does_not_change_the_hash(self):
+        from .document_ingest import compute_content_hash
+
+        reordered = CORPUS_XML.replace(
+            "<segment id='1' features='eror;leksikal' Correction='tetapi'>",
+            "<segment Correction='tetapi' features='eror;leksikal' id='1'>",
+        )
+        self.assertNotEqual(CORPUS_XML, reordered)  # sanity: the fixtures do differ
+        self.assertEqual(compute_content_hash(CORPUS_XML), compute_content_hash(reordered))
+
+    def test_meaningfully_different_plain_text_hashes_differently(self):
+        from .document_ingest import compute_content_hash
+
+        self.assertNotEqual(
+            compute_content_hash("saya suka teh"),
+            compute_content_hash("saya suka kopi"),
+        )
+
+    def test_get_or_create_document_reuses_existing_content(self):
+        from .document_ingest import get_or_create_document
+
+        first, created_first = get_or_create_document(title='a.txt', content='saya suka teh', user=None)
+        self.assertTrue(created_first)
+
+        second, created_second = get_or_create_document(title='b.txt', content='saya suka teh', user=None)
+        self.assertFalse(created_second)
+        self.assertEqual(second.id, first.id)
+        self.assertEqual(second.title, 'a.txt')  # dedup hit never renames the existing document
+
+
 class WorkerTaskTests(TestCase):
     """worker/tasks/indexing.py + aggregates.py (architecture plan §5) —
     the async replacement for the old post_save signal. Called directly
@@ -495,6 +548,15 @@ class WorkerTaskTests(TestCase):
         self.assertIsNotNone(doc.content_hash)
         self.assertEqual(doc.content_hash, doc.tokenized_hash)
         self.assertEqual(doc.tokenizer_version, 1)
+
+    def test_index_document_uses_the_shared_hash_formula(self):
+        from .document_ingest import compute_content_hash
+
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, compute_content_hash(CORPUS_XML))
 
     def test_index_document_resolves_word_type_correctly(self):
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
@@ -646,6 +708,35 @@ class CorpusCrudApiTests(ExplorerTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('files', response.json())
         self.assertFalse(Corpus.objects.filter(name='Bad file corpus').exists())
+
+    def test_create_with_duplicate_file_reuses_existing_document(self):
+        before_count = Document.objects.count()
+        upload = SimpleUploadedFile('replay.txt', PLAIN_TEXT.encode('utf-8'), content_type='text/plain')
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data={'name': 'Reuse corpus', 'files': [upload]},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body['deduplicated_count'], 1)
+        self.assertEqual([d['id'] for d in body['documents']], [self.plain.id])
+        self.assertEqual(Document.objects.count(), before_count)  # no new row
+
+    def test_create_with_mixed_duplicate_and_new_files(self):
+        before_count = Document.objects.count()
+        duplicate = SimpleUploadedFile('replay.txt', PLAIN_TEXT.encode('utf-8'), content_type='text/plain')
+        new = SimpleUploadedFile('fresh.txt', b'saya suka kopi', content_type='text/plain')
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data={'name': 'Mixed corpus', 'files': [duplicate, new]},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertEqual(body['deduplicated_count'], 1)
+        self.assertEqual(body['document_count'], 2)
+        self.assertEqual(Document.objects.count(), before_count + 1)  # exactly one new row
 
     def test_any_authenticated_user_can_retrieve_corpus_detail(self):
         response = self.client.get(
@@ -801,6 +892,96 @@ class DocumentApiTests(ExplorerTestCase):
         self.assertIn('file', response.json())
         self.assertFalse(Document.objects.filter(title='Bad file').exists())
 
+    def test_uploading_duplicate_file_content_reuses_existing_document(self):
+        before_count = Document.objects.count()
+        upload = SimpleUploadedFile('replay.txt', PLAIN_TEXT.encode('utf-8'), content_type='text/plain')
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data={'title': 'replay.txt', 'file': upload},
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)  # not 201 — no new row created
+        body = response.json()
+        self.assertTrue(body['duplicate'])
+        self.assertEqual(body['id'], self.plain.id)
+        self.assertEqual(Document.objects.count(), before_count)
+
+    def test_uploading_duplicate_pasted_content_reuses_existing_document(self):
+        before_count = Document.objects.count()
+        response = self.client.post(
+            reverse('api_document_upload'),
+            data=json.dumps({'title': 'Different title', 'content': PLAIN_TEXT}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body['duplicate'])
+        self.assertEqual(body['id'], self.plain.id)
+        self.assertEqual(body['title'], 'plain.txt')  # existing title wins, not the new upload's
+        self.assertEqual(Document.objects.count(), before_count)
+
+    def test_duplicate_upload_does_not_change_existing_corpus_membership(self):
+        before_corpora = set(self.plain.corpora.values_list('id', flat=True))
+        self.client.post(
+            reverse('api_document_upload'),
+            data=json.dumps({'title': 'Different title', 'content': PLAIN_TEXT}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.plain.refresh_from_db()
+        self.assertEqual(set(self.plain.corpora.values_list('id', flat=True)), before_corpora)
+
+
+class HtmlUploadDedupTests(ExplorerTestCase):
+    """Server-rendered corpus_create/corpus_edit/upload_document
+    (docs/content-hash-dedup.md) — confirms the HTML views reuse existing
+    Document rows on duplicate content, the same as their JSON API
+    equivalents in CorpusCrudApiTests/DocumentApiTests."""
+
+    def setUp(self):
+        self.client.force_login(self.staff)
+
+    def test_corpus_create_reuses_duplicate_file_content(self):
+        before_count = Document.objects.count()
+        upload = SimpleUploadedFile('replay.txt', PLAIN_TEXT.encode('utf-8'), content_type='text/plain')
+        response = self.client.post(reverse('corpus_create'), {
+            'name': 'HTML reuse corpus',
+            'description': '',
+            'files': [upload],
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Document.objects.count(), before_count)
+
+        corpus = Corpus.objects.get(name='HTML reuse corpus')
+        self.assertEqual([d.id for d in corpus.documents.all()], [self.plain.id])
+
+        messages_text = ' '.join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn('already existed', messages_text)
+
+    def test_corpus_edit_reuses_duplicate_file_content(self):
+        before_count = Document.objects.count()
+        upload = SimpleUploadedFile('replay.txt', PLAIN_TEXT.encode('utf-8'), content_type='text/plain')
+        response = self.client.post(reverse('corpus_edit', args=[self.other.id]), {
+            'name': self.other.name,
+            'description': '',
+            'files': [upload],
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Document.objects.count(), before_count)
+
+    def test_upload_document_reuses_duplicate_content(self):
+        before_count = Document.objects.count()
+        response = self.client.post(reverse('upload_document'), {
+            'title': 'Different title',
+            'content': PLAIN_TEXT,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Document.objects.count(), before_count)
+
+        messages_text = ' '.join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn('already exists', messages_text)
+
 
 class AccountApiTests(TestCase):
     """main/api_account.py (architecture plan §6, KUIS-FE rebuild) —
@@ -885,6 +1066,59 @@ class AccountApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(len(mail.outbox), 0)
+
+
+class BackfillContentHashCommandTests(TestCase):
+    """main/management/commands/backfill_content_hash.py
+    (docs/content-hash-dedup.md) — recomputes content_hash/tokenized_hash
+    under the new canonicalized formula for documents hashed (or never
+    hashed) under the old one, without touching Token/aggregate rows."""
+
+    def test_recomputes_hash_with_new_formula(self):
+        from .document_ingest import compute_content_hash
+
+        doc = Document.objects.create(
+            title='t.txt', content='saya suka teh',
+            content_hash='stale-placeholder', tokenized_hash='stale-placeholder',
+        )
+
+        call_command('backfill_content_hash', stdout=StringIO())
+
+        doc.refresh_from_db()
+        expected = compute_content_hash('saya suka teh')
+        self.assertEqual(doc.content_hash, expected)
+        self.assertEqual(doc.tokenized_hash, expected)
+
+    def test_never_backfills_tokenized_hash_for_a_never_indexed_document(self):
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+        self.assertIsNone(doc.tokenized_hash)
+
+        call_command('backfill_content_hash', stdout=StringIO())
+
+        doc.refresh_from_db()
+        self.assertIsNotNone(doc.content_hash)
+        self.assertIsNone(doc.tokenized_hash)  # never indexed — nothing to keep in lockstep
+
+    def test_reports_but_does_not_merge_pre_existing_duplicates(self):
+        first = Document.objects.create(
+            title='dup-a.txt', content='saya suka teh', content_hash='stale-a',
+        )
+        second = Document.objects.create(
+            title='dup-b.txt', content='saya suka teh', content_hash='stale-b',
+        )
+
+        out = StringIO()
+        call_command('backfill_content_hash', stdout=out)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.content_hash, 'stale-a')  # left untouched
+        self.assertEqual(second.content_hash, 'stale-b')  # left untouched
+
+        output = out.getvalue()
+        self.assertIn('dup-a.txt', output)
+        self.assertIn('dup-b.txt', output)
+        self.assertIn('duplicate-content group', output)
 
 
 class ProfileApiTests(TestCase):

@@ -32,12 +32,13 @@ class Document(models.Model):
     # 'ready' by main/management/commands/backfill_tier2.py.
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_READY)
 
-    # Integrity/reproducibility placeholders (optimisation_plan.md §5) —
-    # reserved now (Tier 1 migration batch) so a later backfill pass isn't
-    # needed once something actually reads them. tokenizer_version is
-    # populated starting this phase; content_hash/tokenized_hash are
-    # computed by the worker but nothing yet checks them for staleness
-    # (that's the follow-up this column exists to make possible later).
+    # Integrity/reproducibility placeholders (optimisation_plan.md §5).
+    # content_hash now doubles as the upload-time dedup key (see
+    # docs/content-hash-dedup.md and main/document_ingest.py) — the unique
+    # constraint below enforces it at the DB level. tokenized_hash tracks
+    # what the current Token rows were actually built from; a future
+    # `tokenized_hash IS DISTINCT FROM content_hash` staleness check remains
+    # a separate, still-open item.
     content_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenized_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenizer_version = models.IntegerField(null=True, blank=True)
@@ -45,6 +46,9 @@ class Document(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['user', 'uploaded_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['content_hash'], name='uniq_document_content_hash'),
         ]
 
     def __str__(self):

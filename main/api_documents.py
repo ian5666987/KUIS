@@ -13,18 +13,11 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .document_ingest import decode_uploaded_file, get_or_create_document
 from .models import Document
 from worker.tasks.indexing import index_document
 
 ADMIN_PERMISSIONS = [IsAuthenticated, IsAdminUser]
-
-
-def _document_from_upload(uploaded_file, user, title=None):
-    """Duplicated from main/views.py — see main/api_corpus.py's module
-    docstring for why these API modules stay decoupled from views.py's own
-    underscore-prefixed internals rather than importing them."""
-    content = uploaded_file.read().decode("utf-8")
-    return Document(title=title or uploaded_file.name, content=content, user=user)
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -97,14 +90,16 @@ class DocumentUploadView(APIView):
 
         if uploaded_file:
             try:
-                content = _document_from_upload(uploaded_file, request.user, title=title).content
+                content = decode_uploaded_file(uploaded_file)
             except UnicodeDecodeError:
                 return Response({"file": ["File must be UTF-8 encoded."]}, status=400)
 
-        doc = Document.objects.create(title=title, content=content, user=request.user)
-        index_document.delay(doc.id)  # async — see architecture plan §5
+        doc, created = get_or_create_document(title=title, content=content, user=request.user)
+        if created:
+            index_document.delay(doc.id)  # async — see architecture plan §5
 
         output = DocumentSerializer(
             Document.objects.annotate(corpus_count=Count("corpora", distinct=True)).get(id=doc.id)
         ).data
-        return Response(output, status=status.HTTP_201_CREATED)
+        output["duplicate"] = not created
+        return Response(output, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)

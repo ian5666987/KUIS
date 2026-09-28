@@ -12,13 +12,13 @@ but stacking IsAuthenticated first preserves the existing 401-for-anonymous
 behavior main/tests.py::CorpusApiTests already pins, instead of falling
 through to a bare 403).
 
-The annotated queryset and _document_from_upload below intentionally
-duplicate main/views.py's private _annotated_corpora()/_document_from_upload
-rather than importing them — same reasoning as the original Phase 3
-docstring: this module is a different, additive surface (JSON API vs.
-server-rendered HTML) that happens to need the same shape today. A few
-lines of duplication here is a smaller risk than a DRF view reaching into
-another view module's underscore-prefixed internals.
+The annotated queryset below intentionally duplicates main/views.py's private
+_annotated_corpora() rather than importing it — same reasoning as the
+original Phase 3 docstring: this module is a different, additive surface
+(JSON API vs. server-rendered HTML) that happens to need the same shape
+today. File-upload decoding and dedup-or-create instead go through
+main/document_ingest.py (docs/content-hash-dedup.md), a neutral module both
+this file and main/views.py import, rather than each having their own copy.
 """
 
 from django.db.models import Count, Sum
@@ -29,6 +29,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .document_ingest import decode_uploaded_file, get_or_create_document
 from .models import Corpus, Document
 from worker.tasks.indexing import index_document
 
@@ -41,15 +42,6 @@ def _annotated_corpus_queryset():
         token_total=Sum("documents__token_count"),
         token_total_corrected=Sum("documents__token_count_corrected"),
     )
-
-
-def _document_from_upload(uploaded_file, user, title=None):
-    """Builds (unsaved) a Document from an uploaded file. Raises
-    UnicodeDecodeError if the file isn't UTF-8, which callers turn into a
-    400 response — the API equivalent of main/views.py's same-named helper
-    turning this into a form error."""
-    content = uploaded_file.read().decode("utf-8")
-    return Document(title=title or uploaded_file.name, content=content, user=user)
 
 
 class CorpusSerializer(serializers.ModelSerializer):
@@ -158,8 +150,8 @@ class CorpusListView(ListAPIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            new_documents = [
-                _document_from_upload(f, request.user) for f in request.FILES.getlist("files")
+            file_contents = [
+                (f.name, decode_uploaded_file(f)) for f in request.FILES.getlist("files")
             ]
         except UnicodeDecodeError:
             return Response({"files": ["Uploaded files must be UTF-8 encoded."]}, status=400)
@@ -167,13 +159,20 @@ class CorpusListView(ListAPIView):
         documents = serializer.validated_data.pop("documents", [])
         corpus = Corpus.objects.create(created_by=request.user, **serializer.validated_data)
 
-        for doc in new_documents:
-            doc.save()
-            index_document.delay(doc.id)  # async — see architecture plan §5
+        resolved_documents = []
+        deduplicated_count = 0
+        for name, content in file_contents:
+            doc, created = get_or_create_document(title=name, content=content, user=request.user)
+            if created:
+                index_document.delay(doc.id)  # async — see architecture plan §5
+            else:
+                deduplicated_count += 1
+            resolved_documents.append(doc)
 
-        corpus.documents.set(list(documents) + new_documents)
+        corpus.documents.set(list(documents) + resolved_documents)
 
         output = CorpusDetailSerializer(_annotated_corpus_queryset().get(id=corpus.id)).data
+        output["deduplicated_count"] = deduplicated_count
         return Response(output, status=status.HTTP_201_CREATED)
 
 
@@ -201,8 +200,8 @@ class CorpusDetailView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            new_documents = [
-                _document_from_upload(f, request.user) for f in request.FILES.getlist("files")
+            file_contents = [
+                (f.name, decode_uploaded_file(f)) for f in request.FILES.getlist("files")
             ]
         except UnicodeDecodeError:
             return Response({"files": ["Uploaded files must be UTF-8 encoded."]}, status=400)
@@ -212,13 +211,20 @@ class CorpusDetailView(APIView):
             setattr(corpus, field, value)
         corpus.save()
 
-        for doc in new_documents:
-            doc.save()
-            index_document.delay(doc.id)  # async — see architecture plan §5
+        resolved_documents = []
+        deduplicated_count = 0
+        for name, content in file_contents:
+            doc, created = get_or_create_document(title=name, content=content, user=request.user)
+            if created:
+                index_document.delay(doc.id)  # async — see architecture plan §5
+            else:
+                deduplicated_count += 1
+            resolved_documents.append(doc)
 
-        corpus.documents.set(list(documents) + new_documents)
+        corpus.documents.set(list(documents) + resolved_documents)
 
         output = CorpusDetailSerializer(_annotated_corpus_queryset().get(id=corpus.id)).data
+        output["deduplicated_count"] = deduplicated_count
         return Response(output)
 
     def delete(self, request, pk):

@@ -12,8 +12,7 @@ exist — a caller polling status sees either 'indexing' or a fully-usable
 'ready' document, never a half-finished state.
 """
 
-import hashlib
-
+from main.document_ingest import compute_content_hash
 from main.models import Document, Token, build_tokens
 from worker.celery_app import app
 from worker.tasks.aggregates import compute_document_ngrams, compute_document_word_freq
@@ -38,7 +37,7 @@ def index_document(document_id: int) -> int:
         # already does for the same reason.
         Token.objects.filter(document=document).delete()
 
-        content_hash = hashlib.sha256(document.content.encode("utf-8")).hexdigest()
+        content_hash = compute_content_hash(document.content)
         token_count, token_count_corrected = build_tokens(document)
 
         document.token_count = token_count
