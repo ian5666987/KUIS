@@ -9,5 +9,7 @@ admin.site.register(Document)
 
 @admin.register(Corpus)
 class CorpusAdmin(admin.ModelAdmin):
-    list_display = ('name', 'created_by', 'created_at')
+    list_display = ('name', 'created_by', 'is_public', 'created_at')
+    list_filter = ('is_public',)
+    list_editable = ('is_public',)
     filter_horizontal = ('documents',)

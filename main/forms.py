@@ -72,11 +72,18 @@ class CorpusForm(forms.ModelForm):
 
     class Meta:
         model = Corpus
-        fields = ['name', 'description', 'documents']
+        fields = ['name', 'description', 'is_public', 'documents']
 
         widgets = {
             'name': forms.TextInput(attrs={'class': 'field'}),
             'description': forms.Textarea(attrs={'class': 'field', 'rows': 3}),
+            'is_public': forms.CheckboxInput(),
+        }
+        labels = {
+            'is_public': 'Public',
+        }
+        help_texts = {
+            'is_public': 'Visible to every registered user. Uncheck to keep this corpus visible only to admins.',
         }
 
     def clean(self):

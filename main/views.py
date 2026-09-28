@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect, get_object_or_404 # redirect is needed for form
-from django.http import HttpResponse
+from django.http import HttpResponse, Http404
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -173,6 +173,12 @@ def _annotated_corpora():
 def corpus_dashboard(request):
     query = request.GET.get('q', '').strip()
     corpora = _annotated_corpora()
+    if not request.user.is_staff:
+        # Private corpora are an admin-only sharing choice (Corpus.is_public) —
+        # a non-staff user sees only what's been shared, same rule
+        # main/api_corpus.py's CorpusListView enforces for the API.
+        corpora = corpora.filter(is_public=True)
+    corpus_total = corpora.count()  # visible total, counted before the search filter below
 
     if query:
         corpora = corpora.filter(Q(name__icontains=query) | Q(description__icontains=query))
@@ -192,7 +198,7 @@ def corpus_dashboard(request):
 
     return render(request, 'main/corpus_dashboard.html', {
         'corpora': corpora,
-        'corpus_total': Corpus.objects.count(),
+        'corpus_total': corpus_total,
         'query': query,
         'unassigned': unassigned,
         'unassigned_count': unassigned.count(),
@@ -305,6 +311,11 @@ def corpus_create(request):
 @login_required
 def corpus_detail(request, corpus_id):
     corpus = get_object_or_404(Corpus, id=corpus_id)
+    if not corpus.is_public and not request.user.is_staff:
+        # Same rule as corpus_dashboard's listing filter — a private corpus
+        # not shared with this user doesn't exist as far as they're concerned,
+        # 404 rather than 403 so its existence isn't leaked either.
+        raise Http404('No Corpus matches the given query.')
 
     documents = corpus.documents.all().prefetch_related('corpora')
 

@@ -41,6 +41,13 @@
           <!-- <p class="field-hint">Shown in the corpus picker — say what this grouping represents.</p> -->
         </div>
 
+        <div class="field-group">
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:400;" for="{{ form.is_public.id_for_label }}">
+            {{ form.is_public }} Public
+          </label>
+          <p class="field-hint">{{ form.is_public.help_text }}</p>
+        </div>
+
       </div>
     </div>
 

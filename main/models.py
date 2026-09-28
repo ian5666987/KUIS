@@ -60,6 +60,18 @@ class Corpus(models.Model):
     documents = models.ManyToManyField(Document, related_name='corpora', blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Admin-only sharing toggle: public corpora are visible to every
+    # registered user (the behavior every corpus already had before this
+    # field existed, hence default=True — flipping it on doesn't change
+    # any existing corpus's visibility). Private corpora are visible only
+    # to staff. Enforced in main/views.py (corpus_dashboard/corpus_detail)
+    # and main/api_corpus.py (CorpusListView/CorpusDetailView) — both
+    # surfaces are live at once (docs/ONBOARDING.md §1), so both filter on
+    # this the same way rather than just one of them.
+    is_public = models.BooleanField(
+        default=True,
+        help_text='Public corpora are visible to every registered user. Private corpora are visible only to admins.',
+    )
 
     class Meta:
         verbose_name_plural = 'corpora'

@@ -8,12 +8,12 @@
 
 **KUIS** is a Django 6.0.4 web app for analyzing an Indonesian-language learner corpus. Admins upload XML files (plain text plus `<segment>` error annotations with corrections) and group them into named **corpora**; registered users then run corpus-linguistics reports across any multi-select of those corpora: word frequency, collocations, n-grams, and KWIC (keyword-in-context) search — each with an "original vs. corrected" text toggle.
 
-- **Architecture**: classic server-rendered Django monolith. No REST API, no JS framework/SPA. The interface is a self-contained stylesheet (`main/static/main/kuis.css`, design tokens + components, no framework and no CDN) plus one optional progressive-enhancement script (`main/static/main/kuis.js`): corpus search, bulk select, panel collapse, auto-submit and the busy indicator. Every page works with JavaScript disabled.
-- **Django structure**: one project package `config/` (settings/urls/wsgi/asgi) + one app `main/` (all models, views, forms, admin, templates, template tags, static assets, the XML parser, migrations, one management command). `info/` at repo root is **not code** — it holds a proposal PDF, two sample corpus XML files, and informal notes (not a README).
+- **Architecture**: the original server-rendered Django monolith **plus** a growing REST/JWT API surface (`main/api_*.py`) that a separate Next.js frontend (`KUIS-FE`) is being rebuilt against — see `docs/new-architecture.md` for the full revamp plan and phase-by-phase status. Both surfaces are live at once: the server-rendered pages below still work unchanged, and the API duplicates the same features for the new frontend. The server-rendered interface is a self-contained stylesheet (`main/static/main/kuis.css`, design tokens + components, no framework and no CDN) plus one optional progressive-enhancement script (`main/static/main/kuis.js`): corpus search, bulk select, panel collapse, auto-submit and the busy indicator. Every page works with JavaScript disabled.
+- **Django structure**: one project package `config/` (settings/urls/wsgi/asgi) + one app `main/` (models, views, forms, admin, templates, template tags, static assets, the XML parser, migrations, the API views `api_auth.py`/`api_account.py`/`api_corpus.py`/`api_documents.py`, and management commands including `seed`). `dataplane/` is a separate FastAPI service (fast-KWIC and other read paths) and `worker/` a Celery skeleton — both introduced by the revamp, see `docs/new-architecture.md`. `info/` at repo root is **not code** — it holds a proposal PDF, two sample corpus XML files, and informal notes (not a README).
 - **Two URL areas**: `/corpus/…` for curation (which files form which corpus) and `/analysis/…` for the reports. Analysis is never per-file — it always runs over the corpora currently selected in the session.
-- **Auth**: Django's built-in `auth.User` (no custom user model), with a three-tier access model driven purely by `is_staff` — no roles or permissions tables. See §5.
+- **Auth**: Django's built-in `auth.User` (no custom user model), with a three-tier access model driven purely by `is_staff` — no roles or permissions tables. See §5. The server-rendered pages authenticate via session cookies as before; the API additionally issues JWTs (`main/api_auth.py`, `djangorestframework-simplejwt`) carrying the same `is_staff` flag as a claim, so both surfaces enforce the identical RBAC rule.
 - **Database**: PostgreSQL via `psycopg2-binary`, configured entirely through env vars (`django-environ`).
-- **No deployment tooling exists yet**: no Dockerfile/Procfile, no CI/CD.
+- **Deployment tooling**: `docker/{django,fastapi,worker}.Dockerfile` + `docker-compose.yml` for local multi-service dev, and `.github/workflows/{ci,deploy}.yml` for CI/CD — added by the revamp (`docs/new-architecture.md`, Phase 0).
 
 ---
 
@@ -37,6 +37,7 @@
 | **CSV export** | registered | Every analysis has an `/export/` route that re-runs the same query with the same filter and sort, unpaginated | `main/views.py` (`*_export_csv`, `_csv_response`) |
 | **Django Admin** | admin | `Document` and `Corpus` registered (`CorpusAdmin` uses `filter_horizontal` for the M2M) | `main/admin.py` |
 | **`retokenize` command** | CLI | Rebuilds all `Token` rows from current `Document.content`. Run after changing tokenization logic or editing a document's content | `main/management/commands/retokenize.py` |
+| **`seed` command** | CLI | Bootstraps one admin (`is_staff`/`is_superuser`) and one non-admin user from `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` and `SEED_USER_EMAIL`/`SEED_USER_PASSWORD` in `.env`. Idempotent; `--update` resets password/flags on existing users. See §8/§9 | `main/management/commands/seed.py` |
 
 ---
 
@@ -123,12 +124,18 @@ main/
 |---|---|---|
 | `SECRET_KEY` | Django `SECRET_KEY` | none (required) |
 | `DEBUG` | `DEBUG` (bool) | `False` |
+| `ALLOWED_HOSTS` | `ALLOWED_HOSTS` (comma-separated) | `[]` — **required once `DEBUG=False`**, see below |
 | `DB_ENGINE` | `DATABASES.default.ENGINE` | `django.db.backends.postgresql` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` | database credentials | none (required) |
 | `DB_HOST` | `DATABASES.default.HOST` | `localhost` |
 | `DB_PORT` | `DATABASES.default.PORT` | `5432` |
+| `REDIS_URL` | Celery broker/result backend (`worker/celery_app.py`) | `redis://localhost:6379/0` |
+| `JWT_SECRET` | SimpleJWT signing key (`main/api_auth.py`) — deliberately separate from `SECRET_KEY` | none (required for the API) |
+| `CORS_ALLOWED_ORIGINS` | origins allowed to call `/api/*` (comma-separated) | `http://localhost:3000` |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | `seed` command's admin account | none (skips that account if blank) |
+| `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` | `seed` command's non-admin account | none (skips that account if blank) |
 
-`ALLOWED_HOSTS = []` is **hardcoded** (not env-driven) — see §5. No `STATIC_ROOT`/`MEDIA_ROOT` configured (no static files exist; Bootstrap is CDN-only).
+`ALLOWED_HOSTS` is now env-driven (previously hardcoded to `[]`, which rejected every request once `DEBUG=False`); Django's test client adds `testserver` automatically regardless. No `STATIC_ROOT`/`MEDIA_ROOT` configured for the server-rendered pages (no static files exist; Bootstrap is CDN-only) — `STATIC_ROOT` for `collectstatic` was added separately for the Docker/deploy path (`docs/new-architecture.md`, Phase 0).
 
 ### Dependencies (`requirements.txt`)
 `Django==6.0.4`, `django-environ==0.11.2`, `psycopg2-binary==2.9.12`, plus transitive pins `asgiref==3.11.1`, `sqlparse==0.5.5`, `tzdata==2026.1`. No Pipfile/pyproject.toml. The interface adds no dependency: `django.contrib.humanize` (thousands separators) is the only new `INSTALLED_APPS` entry, and static files are served by `django.contrib.staticfiles` in development.
@@ -163,6 +170,8 @@ Admin-only views: `upload_document`, `corpus_create`, `corpus_edit`, `corpus_del
 
 Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dashboard.html`), so non-admins never see the upload/create/edit/delete buttons — but the server-side decorators are the actual boundary, not the template checks.
 
+**API surface (`main/api_*.py`) enforces the same rule, independently.** `main/api_auth.py`'s token view puts `is_staff` straight onto the JWT as a claim; DRF views then gate with `[IsAuthenticated, IsAdminUser]` (`IsAdminUser` checks `is_staff`) on the same admin-only actions — corpus create/edit/delete (`api_corpus.py`) and document upload (`api_documents.py`). There's no separate roles/permissions table for the API either; it's the same `User.is_staff` flag checked twice, once per surface. Use `python manage.py seed` (§8/§9) to get one admin and one non-admin account for testing both tiers against either surface without hand-editing users in `/admin/`.
+
 ---
 
 ## 6. Edge Cases & Technical Considerations
@@ -179,8 +188,8 @@ Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dash
 - **Nested `<segment>` elements are only partially walked** by `_walk_body` (direct children of `<body>` only). Any future error-analysis feature should traverse with `body.iter('segment')` instead.
 - **Malformed XML still degrades to flat regex tokenization**, but no longer silently: see `parse_document`'s `is_structured` flag and `components/mode_notice.html`.
 - **Performance**: analysis re-parses XML for every selected document on every request, so cost scales with the number of selected files. Fine at current volumes; `Token` is already the indexed fast path if word frequency ever needs `.values('word').annotate(Count('id'))` instead.
-- **`ALLOWED_HOSTS = []`** is hardcoded in `config/settings.py`, not env-driven — it rejects all requests once `DEBUG=False`, and it also blocks Django's test client (override it in-process when testing). Must be fixed before any real deployment.
-- **Tests**: `main/tests.py` covers page rendering, selection persistence and clearing, overlap dedupe, the text-mode substitution, the table controls and every CSV export. Run them against SQLite without a Postgres instance: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: python manage.py test main`. Django adds `testserver` to the hardcoded empty `ALLOWED_HOSTS` automatically, so no override is needed.
+- **`ALLOWED_HOSTS` is env-driven** (`config/settings.py`), defaulting to `[]` — set it in `.env` before running with `DEBUG=False`. Django's test client adds `testserver` automatically regardless, so tests need no override.
+- **Tests**: `main/tests.py` covers page rendering, selection persistence and clearing, overlap dedupe, the text-mode substitution, the table controls and every CSV export. Run them against SQLite without a Postgres instance: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: python manage.py test main`. Django adds `testserver` to `ALLOWED_HOSTS` automatically for the test client, so no override is needed even with an empty/unset value.
 - **Multi-line `{# … #}` template comments do not work.** Django's comment token is single-line only, so a multi-line `{# … #}` renders into the page as literal text. Use `{% comment %} … {% endcomment %}`.
 
 ---
@@ -212,10 +221,10 @@ Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dash
 
 ### Must be configured manually
 1. **Python + venv** — the project runs under Python 3.14.x (per `info/new_device.md`); no `.python-version` pin exists in-repo.
-2. **`.env` file** — copy `.env.example` → `.env`, fill in `SECRET_KEY` (generate a fresh one) and the `DB_*` vars.
-3. **PostgreSQL** — create a database + role matching your `.env`. No seed data exists; migrations recreate schema only.
-4. **Admin user** — `python manage.py createsuperuser`. **Required**: without an `is_staff` user nobody can upload files or create corpora, which means no analysis is possible at all.
-5. **Deployment infrastructure** — none exists (no Dockerfile/Procfile/CI). Also revisit `ALLOWED_HOSTS`, `EMAIL_BACKEND`, and `STATIC_ROOT`/`MEDIA_ROOT` before deploying with `DEBUG=False`.
+2. **`.env` file** — copy `.env.example` → `.env`, fill in `SECRET_KEY` (generate a fresh one), the `DB_*` vars, `JWT_SECRET` (needed for the API surface even if you're only using the server-rendered pages, since it's read at settings-load time), and the `SEED_*` vars covered next.
+3. **PostgreSQL** — create a database + role matching your `.env`. No seed *data* exists; migrations recreate schema only.
+4. **Admin + test user** — `python manage.py seed` (`main/management/commands/seed.py`) creates one admin (`is_staff`/`is_superuser`) and one non-admin user from the `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` and `SEED_USER_EMAIL`/`SEED_USER_PASSWORD` entries in `.env` — either pair can be left blank to skip that account. **Required**: without an `is_staff` user nobody can upload files or create corpora, which means no analysis is possible at all; the non-admin account is what lets you exercise the RBAC boundary (§5) without a second manual signup. Safe to rerun; pass `--update` to reset an existing account's password/flags. `python manage.py createsuperuser` still works as a one-off alternative for the admin account only.
+5. **Deployment infrastructure** — `docker/{django,fastapi,worker}.Dockerfile` + `docker-compose.yml` and `.github/workflows/{ci,deploy}.yml` now exist (`docs/new-architecture.md`, Phase 0) for containerized/CI use; running locally via `manage.py runserver` still needs none of it. Revisit `ALLOWED_HOSTS`, `EMAIL_BACKEND`, and `STATIC_ROOT`/`MEDIA_ROOT` before deploying with `DEBUG=False`.
 
 ### Handled automatically
 - Schema + the legacy-corpus data migration via `python manage.py migrate`.
@@ -229,11 +238,11 @@ Templates gate admin affordances with `{% if user.is_staff %}` (see `corpus_dash
 1. `git clone <repo> && cd KUIS`
 2. `python -m venv venv && source venv/bin/activate` (Windows: `venv\Scripts\Activate.ps1`)
 3. `pip install -r requirements.txt`
-4. `cp .env.example .env` — set `SECRET_KEY` and the `DB_*` vars against a local Postgres database you've created
+4. `cp .env.example .env` — set `SECRET_KEY`, `JWT_SECRET`, the `DB_*` vars against a local Postgres database you've created, and `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` + `SEED_USER_EMAIL`/`SEED_USER_PASSWORD` (pick any local dev credentials — these are your own `.env`, never committed)
 5. `python manage.py migrate`
-6. `python manage.py createsuperuser` — **not optional**, see §8.4
+6. `python manage.py seed` — **not optional**, see §8.4. Creates the admin and non-admin accounts from the `SEED_*` vars you just set.
 7. `python manage.py runserver` → open `http://127.0.0.1:8000/`
-8. Log in as the superuser → **Corpora** → *Create New Corpus* → name it, tick existing files and/or upload XML from `info/*.xml` → **Analysis** → tick one or more corpora → run Word Frequency / Collocations / N-grams / KWIC.
+8. Log in as the seeded admin (`SEED_ADMIN_EMAIL`) → **Corpora** → *Create New Corpus* → name it, tick existing files and/or upload XML from `info/*.xml` → **Analysis** → tick one or more corpora → run Word Frequency / Collocations / N-grams / KWIC. Log in as the seeded non-admin (`SEED_USER_EMAIL`) in a separate session to confirm the upload/create/edit/delete affordances are hidden and blocked (§5).
 
 ---
 

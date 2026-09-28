@@ -22,6 +22,7 @@ this file and main/views.py import, rather than each having their own copy.
 """
 
 from django.db.models import Count, Sum
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.generics import ListAPIView
@@ -65,6 +66,7 @@ class CorpusSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "description",
+            "is_public",
             "document_count",
             "token_total",
             "token_total_corrected",
@@ -114,7 +116,11 @@ class CorpusWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Corpus
-        fields = ["name", "description", "document_ids"]
+        # is_public is an admin-only sharing choice (Corpus.is_public docstring,
+        # main/models.py) — required=False comes for free from the model's
+        # default=True, so a PATCH that omits it (there isn't one today; the
+        # frontend always resubmits the full form) leaves it unchanged.
+        fields = ["name", "description", "is_public", "document_ids"]
 
     def validate(self, attrs):
         documents = attrs.get("documents", [])
@@ -130,7 +136,9 @@ class CorpusWriteSerializer(serializers.ModelSerializer):
 
 class CorpusListView(ListAPIView):
     """GET /api/corpora/ — any authenticated user (matches
-    main/views.py::corpus_dashboard's plain @login_required). POST — admin
+    main/views.py::corpus_dashboard's plain @login_required), but private
+    corpora (Corpus.is_public=False) are filtered out for non-staff —
+    same rule corpus_dashboard applies to its own listing. POST — admin
     only, mirrors main/views.py::corpus_create exactly: same validation,
     same async indexing dispatch via index_document.delay(), same
     full-membership-replace semantics."""
@@ -143,7 +151,10 @@ class CorpusListView(ListAPIView):
         return [IsAuthenticated()]
 
     def get_queryset(self):
-        return _annotated_corpus_queryset().order_by("name")
+        queryset = _annotated_corpus_queryset().order_by("name")
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(is_public=True)
+        return queryset
 
     def post(self, request, *args, **kwargs):
         serializer = CorpusWriteSerializer(data=request.data, context={"request": request})
@@ -178,10 +189,11 @@ class CorpusListView(ListAPIView):
 
 class CorpusDetailView(APIView):
     """GET /api/corpora/<id>/ — any authenticated user, mirrors
-    main/views.py::corpus_detail. PATCH — admin only, mirrors
-    main/views.py::corpus_edit. DELETE — admin only, mirrors
-    main/views.py::corpus_delete (only the Corpus row + M2M join rows;
-    Document rows always survive)."""
+    main/views.py::corpus_detail, including its 404-not-403 handling of a
+    private corpus a non-staff user has no business knowing exists. PATCH
+    — admin only, mirrors main/views.py::corpus_edit. DELETE — admin only,
+    mirrors main/views.py::corpus_delete (only the Corpus row + M2M join
+    rows; Document rows always survive)."""
 
     def get_permissions(self):
         if self.request.method == "GET":
@@ -190,6 +202,8 @@ class CorpusDetailView(APIView):
 
     def get(self, request, pk):
         corpus = get_object_or_404(_annotated_corpus_queryset(), id=pk)
+        if not corpus.is_public and not request.user.is_staff:
+            raise Http404
         return Response(CorpusDetailSerializer(corpus).data)
 
     def patch(self, request, pk):

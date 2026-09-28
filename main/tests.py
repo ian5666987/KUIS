@@ -431,6 +431,133 @@ class JWTAuthTests(TestCase):
         self.assertEqual(self.client.session.get('_auth_user_id'), str(self.user.pk))
 
 
+class CorpusVisibilityTests(ExplorerTestCase):
+    """Corpus.is_public — the admin-only public/private sharing toggle
+    (main/models.py). Both live surfaces enforce the same rule
+    (docs/ONBOARDING.md §1: server-rendered pages and the API are both live
+    at once), so this covers corpus_dashboard/corpus_detail *and*
+    api_corpus.py's CorpusListView/CorpusDetailView side by side."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.private = Corpus.objects.create(name='Internal drafts', is_public=False)
+        cls.private.documents.set([cls.plain])
+
+    def auth_headers(self, username='researcher'):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        access = response.json()['access']
+        return {'HTTP_AUTHORIZATION': f'Bearer {access}'}
+
+    def test_a_corpus_defaults_to_public(self):
+        # self.corpus (ExplorerTestCase.setUpTestData) is created without
+        # passing is_public at all — existing corpora keep today's
+        # behavior (visible to everyone) unless an admin opts them out.
+        self.assertTrue(self.corpus.is_public)
+
+    # --- server-rendered corpus_dashboard / corpus_detail -----------------
+
+    def test_non_staff_does_not_see_private_corpus_in_dashboard(self):
+        response = self.client.get(reverse('corpus_dashboard'))
+        self.assertNotContains(response, 'Internal drafts')
+
+    def test_staff_sees_private_corpus_in_dashboard_with_a_badge(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('corpus_dashboard'))
+        self.assertContains(response, 'Internal drafts')
+        self.assertContains(response, 'Private')
+
+    def test_non_staff_gets_404_for_private_corpus_detail(self):
+        response = self.client.get(reverse('corpus_detail', args=[self.private.id]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_staff_can_view_private_corpus_detail(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('corpus_detail', args=[self.private.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Private')
+
+    def test_non_staff_can_still_view_a_public_corpus_detail(self):
+        response = self.client.get(reverse('corpus_detail', args=[self.corpus.id]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_corpus_form_includes_the_public_toggle(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse('corpus_create'))
+        self.assertContains(response, 'name="is_public"')
+
+    # --- API ----------------------------------------------------------------
+
+    def test_api_list_excludes_private_corpus_for_non_staff(self):
+        response = self.client.get(reverse('api_corpus_list'), **self.auth_headers('researcher'))
+        names = {row['name'] for row in response.json()}
+        self.assertNotIn('Internal drafts', names)
+
+    def test_api_list_includes_private_corpus_for_staff(self):
+        response = self.client.get(reverse('api_corpus_list'), **self.auth_headers('curator'))
+        names = {row['name'] for row in response.json()}
+        self.assertIn('Internal drafts', names)
+
+    def test_api_detail_404s_for_non_staff_on_private_corpus(self):
+        response = self.client.get(
+            reverse('api_corpus_detail', args=[self.private.id]),
+            **self.auth_headers('researcher'),
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_api_detail_works_for_staff_on_private_corpus(self):
+        response = self.client.get(
+            reverse('api_corpus_detail', args=[self.private.id]),
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['is_public'])
+
+    def test_staff_can_create_a_private_corpus_via_api(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({
+                'name': 'New private corpus',
+                'document_ids': [self.plain.id],
+                'is_public': False,
+            }),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.json()['is_public'])
+        self.assertFalse(Corpus.objects.get(name='New private corpus').is_public)
+
+    def test_created_corpus_defaults_to_public_when_omitted_via_api(self):
+        response = self.client.post(
+            reverse('api_corpus_list'),
+            data=json.dumps({'name': 'Default visibility corpus', 'document_ids': [self.plain.id]}),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()['is_public'])
+
+    def test_staff_can_flip_a_corpus_to_private_via_api_patch(self):
+        response = self.client.patch(
+            reverse('api_corpus_detail', args=[self.corpus.id]),
+            data=json.dumps({
+                'name': self.corpus.name,
+                'document_ids': [self.plain.id],
+                'is_public': False,
+            }),
+            content_type='application/json',
+            **self.auth_headers('curator'),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.corpus.refresh_from_db()
+        self.assertFalse(self.corpus.is_public)
+
+
 class CorpusApiTests(ExplorerTestCase):
     """GET /api/corpora/ (main/api_corpus.py) — Phase 3's corpus picker data
     source, the first JSON view of "Corpus Meta" alongside the existing

@@ -61,6 +61,9 @@
                 {% if corpus.id in selected_corpus_ids %}
                   <span class="badge badge--accent" title="Included in your current analysis selection">Selected</span>
                 {% endif %}
+                {% if not corpus.is_public %}
+                  <span class="badge badge--warn" title="Only visible to admins">Private</span>
+                {% endif %}
                 {% if corpus.description %}
                   <div class="text-sm text-muted" style="font-weight:400; max-width:60ch;">{{ corpus.description }}</div>
                 {% endif %}
