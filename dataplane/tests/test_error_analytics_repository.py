@@ -25,39 +25,57 @@ class TestFrequency:
         phrases = {row.phrase for row in page.rows}
         assert phrases == {"nasi", "goreng nasi", "Sayang"}  # never "lagi" — its features don't resolve
 
-    async def test_or_across_error_codes(self, seeded_corpus, session):
+    async def test_or_across_leaf_codes(self, seeded_corpus, session):
         repo = PostgresErrorAnalyticsRepository(session)
         page = await repo.frequency(
             [seeded_corpus["error_doc_id"]],
-            ErrorFilter(error_codes=["ejk"]),
+            ErrorFilter(codes=["ejk"]),
             None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0,
         )
 
         by_phrase = {row.phrase: row.frequency for row in page.rows}
         assert by_phrase == {"nasi": 1, "Sayang": 1}  # both ejk occurrences, urtfn excluded
 
-    async def test_and_across_category_paths_narrows_to_the_intersection(self, seeded_corpus, session):
+    async def test_category_code_cascades_to_every_leaf_descendant(self, seeded_corpus, session):
+        # A tree-picker "select this category" click sends just the
+        # category's own code — checking "gramatikal" must resolve to
+        # exactly the same leaves as explicitly listing every leaf under
+        # it (here, just urtfn), same mechanism as a leaf code, no
+        # separate exact-match branch.
         repo = PostgresErrorAnalyticsRepository(session)
         page = await repo.frequency(
             [seeded_corpus["error_doc_id"]],
-            ErrorFilter(category_paths=["gramatikal", "frasa-nomina"]),
+            ErrorFilter(codes=["gramatikal"]),
             None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0,
         )
 
         assert [row.phrase for row in page.rows] == ["goreng nasi"]
 
-    async def test_and_across_category_paths_from_different_branches_yields_nothing(self, seeded_corpus, session):
-        # "gramatikal" and "ejaan" are sibling top categories — no leaf can
-        # be under both, so this must return empty, not an error.
+    async def test_multiple_codes_union_across_branches(self, seeded_corpus, session):
+        # Checking two different branches (or a leaf plus an unrelated
+        # category) unions their results — the tree-picker's "checking
+        # several nodes means either" semantics, replacing the earlier
+        # AND-drill-down design (checking two sibling categories used to
+        # mean "under both", which is never satisfiable for unrelated
+        # branches; a real tree checkbox doesn't work that way).
         repo = PostgresErrorAnalyticsRepository(session)
         page = await repo.frequency(
             [seeded_corpus["error_doc_id"]],
-            ErrorFilter(category_paths=["gramatikal", "ejaan"]),
+            ErrorFilter(codes=["gramatikal", "ejaan"]),
             None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0,
         )
 
-        assert page.rows == []
-        assert page.result_count == 0
+        assert {row.phrase for row in page.rows} == {"nasi", "goreng nasi", "Sayang"}
+
+    async def test_leaf_and_category_codes_can_be_mixed(self, seeded_corpus, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        page = await repo.frequency(
+            [seeded_corpus["error_doc_id"]],
+            ErrorFilter(codes=["ejk", "gramatikal"]),
+            None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0,
+        )
+
+        assert {row.phrase for row in page.rows} == {"nasi", "goreng nasi", "Sayang"}
 
     async def test_query_filter_matches_case_insensitively_but_preserves_display_case(self, seeded_corpus, session):
         repo = PostgresErrorAnalyticsRepository(session)
@@ -81,7 +99,7 @@ class TestOccurrences:
     async def test_occurrence_carries_context_and_correction(self, seeded_corpus, session):
         repo = PostgresErrorAnalyticsRepository(session)
         hits = await repo.occurrences(
-            [seeded_corpus["error_doc_id"]], ErrorFilter(error_codes=["urtfn"]), window=2, limit=50, offset=0,
+            [seeded_corpus["error_doc_id"]], ErrorFilter(codes=["urtfn"]), window=2, limit=50, offset=0,
         )
 
         assert len(hits) == 1

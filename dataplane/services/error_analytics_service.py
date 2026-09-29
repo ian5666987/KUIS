@@ -2,7 +2,7 @@
 that stays unchanged when ErrorAnalyticsRepository's Postgres
 implementation is later swapped, same reasoning as kwic_service.py/
 frequency_service.py. Owns request-shaping (corpus->document resolution,
-pagination math, building ErrorFilter from the two raw code lists) that has
+pagination math, building ErrorFilter from the raw code list) that has
 nothing to do with which storage engine answers the query."""
 
 from dataclasses import dataclass
@@ -46,15 +46,10 @@ class ErrorAnalyticsService:
         self._session = session
         self._repository = repository
 
-    @staticmethod
-    def _build_filter(error_codes: list[str] | None, categories: list[str] | None) -> ErrorFilter:
-        return ErrorFilter(error_codes=error_codes or None, category_paths=categories or None)
-
     async def frequency(
         self,
         corpus_ids: list[int],
-        error_codes: list[str] | None,
-        categories: list[str] | None,
+        codes: list[str] | None,
         query: str | None,
         match_mode: MatchMode,
         sort: str,
@@ -69,7 +64,7 @@ class ErrorAnalyticsService:
         offset = (page - 1) * per_page
 
         result = await self._repository.frequency(
-            document_ids, self._build_filter(error_codes, categories), query, match_mode, sort, direction, per_page, offset,
+            document_ids, ErrorFilter(codes=codes or None), query, match_mode, sort, direction, per_page, offset,
         )
 
         return ErrorFrequencySearchResult(
@@ -79,8 +74,7 @@ class ErrorAnalyticsService:
     async def occurrences(
         self,
         corpus_ids: list[int],
-        error_codes: list[str] | None,
-        categories: list[str] | None,
+        codes: list[str] | None,
         window: int,
         page: int,
         per_page: int,
@@ -91,7 +85,7 @@ class ErrorAnalyticsService:
 
         document_ids = await resolve_document_ids(self._session, corpus_ids)
         offset = (page - 1) * per_page
-        filter = self._build_filter(error_codes, categories)
+        filter = ErrorFilter(codes=codes or None)
 
         hits = await self._repository.occurrences(document_ids, filter, window, per_page, offset)
         total = await self._repository.count_occurrences(document_ids, filter)

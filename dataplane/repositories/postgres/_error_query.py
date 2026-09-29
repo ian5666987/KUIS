@@ -2,19 +2,25 @@
 Query machinery behind PostgresErrorAnalyticsRepository — Error Frequency
 and EPIC (Error Phrase In Context) (docs/error-analytics-plan.md).
 
-Both filter axes (ErrorFilter.error_codes OR, .category_paths AND) resolve
+ErrorFilter.codes (a flat, OR-combined list of taxonomy codes at any
+depth — a leaf like "ktinf" or a category like "gramatikal") resolves
 against ErrorTaxonomyNode — a small (~90-row) reference table — in ONE
-query, before ErrorAnnotation (the large table) is ever touched:
-  - error_codes -> `code IN (...)` (OR).
-  - category_paths -> for each code, a `concat(';', path, ';') LIKE
-    '%;code;%'` substring-containment check, ANDed. Safe regardless of
-    whether `code` is the first, middle, or last path segment, with zero
-    change to how `path` is stored (that exact semicolon-joined format is
-    load-bearing for main/corpus_parsing.py's raw_features -> node
-    resolution, via worker/tasks/error_annotations.py). Performance is a
-    non-issue either way: this LIKE scan runs against the tiny taxonomy
-    table, never against ErrorAnnotation — the resolved node-id set is then
-    applied there as a plain indexed `taxonomy_node_id IN (...)`.
+query, before ErrorAnnotation (the large table) is ever touched. For each
+code, a `concat(';', path, ';') LIKE '%;code;%'` substring-containment
+check matches EITHER a direct leaf hit (a leaf's own path always ends
+with its own code as the last segment) OR every descendant of a category
+with that code — one mechanism, no separate exact-match branch needed.
+Safe regardless of whether `code` is the first, middle, or last path
+segment, with zero change to how `path` is stored (that exact
+semicolon-joined format is load-bearing for main/corpus_parsing.py's
+raw_features -> node resolution, via worker/tasks/error_annotations.py).
+Performance is a non-issue: this LIKE scan runs against the tiny taxonomy
+table, never against ErrorAnnotation — the resolved node-id set is then
+applied there as a plain indexed `taxonomy_node_id IN (...)`. This is also
+the "batch processing" the frontend relies on: selecting a whole category
+in the tree picker sends just that ONE code, and the whole subtree is
+resolved here in a single query rather than the frontend enumerating and
+sending every individual leaf code.
 
 Error Frequency queries ErrorAnnotation directly (Tier-0/1), not the
 DocumentErrorFreq aggregate — see docs/error-analytics-plan.md Part 3: a
@@ -44,21 +50,14 @@ async def resolve_leaf_node_ids(session: AsyncSession, filter: ErrorFilter) -> l
     """None = no filter given — caller applies no taxonomy_node_id
     predicate at all. [] = a filter was given but matched zero leaves —
     caller short-circuits to an empty result without querying
-    ErrorAnnotation. Both axes apply to the SAME node row in one WHERE
-    clause: `code IN (...)` is OR-across-values by definition; each
-    category's containment check is a separate ANDed condition; a leaf's
-    own `path` already encodes its full ancestor chain, so checking
-    containment on the LEAF's path (not a separate ancestor lookup) is
-    sufficient and correct."""
-    if not filter.error_codes and not filter.category_paths:
+    ErrorAnnotation."""
+    if not filter.codes:
         return None
 
-    conditions = [error_taxonomy_node.c.is_leaf.is_(True)]
-    if filter.error_codes:
-        conditions.append(error_taxonomy_node.c.code.in_(filter.error_codes))
-    if filter.category_paths:
-        for code in filter.category_paths:
-            conditions.append(func.concat(";", error_taxonomy_node.c.path, ";").like(f"%;{code};%"))
+    conditions = [
+        error_taxonomy_node.c.is_leaf.is_(True),
+        or_(*[func.concat(";", error_taxonomy_node.c.path, ";").like(f"%;{code};%") for code in filter.codes]),
+    ]
 
     result = await session.execute(select(error_taxonomy_node.c.id).where(and_(*conditions)))
     return [row[0] for row in result.all()]

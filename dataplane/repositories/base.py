@@ -170,24 +170,34 @@ class NgramRepository(ABC):
 
 # --- Error Analytics ------------------------------------------------------
 # Error Frequency + EPIC (Error Phrase In Context) — see
-# docs/error-analytics-plan.md for the full design. Two filter axes, shared
-# by every method below:
-#   - error_codes: OR — matches ANY of these leaf taxonomy codes (e.g.
-#     ["ktinf", "ejk"]), same OR semantics as every other multi-select
-#     filter in this app.
-#   - category_paths: AND — the matched leaf must be a descendant of EVERY
-#     listed hierarchy code, at any depth (e.g. ["gramatikal", "frasa-
-#     nomina"] narrows to leaves under BOTH) — drill-down narrowing,
-#     implemented via ErrorTaxonomyNode.path containment (see
-#     postgres/_error_query.py).
-# Both None/empty means no filter — every resolved+active annotation
-# matches.
+# docs/error-analytics-plan.md for the full design.
+#
+# `codes` is a flat list of taxonomy codes AT ANY DEPTH (a leaf like
+# "ktinf" or a category like "gramatikal"), OR-combined — matches every
+# leaf annotation that is EITHER that exact leaf OR a descendant of that
+# category. This is the tree-picker's natural semantics: checking a
+# category selects its whole subtree (a standard tree checkbox), checking
+# a leaf selects just that one code, and checking several nodes (leaf or
+# category, any branch) unions all of them. None/empty means no filter —
+# every resolved+active annotation matches.
+#
+# Implemented as a single mechanism (postgres/_error_query.py): a leaf's
+# own `path` already ends with its own code as the last segment, so
+# "path contains code as a segment" correctly matches BOTH a direct leaf
+# hit and a category-descendant hit with the same containment check — no
+# separate exact-match branch needed.
+#
+# (Earlier revision of this design AND-combined a second "category_paths"
+# axis for drill-down narrowing — e.g. "gramatikal" AND "frasa-nomina" to
+# mean "under both". Replaced: once the taxonomy is a visual checkbox
+# tree, AND-across-branches doesn't match how anyone actually expects a
+# tree to behave — checking two nodes reads as "either", not "both",
+# and to narrow to frasa-nomina specifically you just check that node.)
 
 
 @dataclass(frozen=True)
 class ErrorFilter:
-    error_codes: list[str] | None = None
-    category_paths: list[str] | None = None
+    codes: list[str] | None = None
 
 
 @dataclass(frozen=True)

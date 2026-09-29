@@ -4,12 +4,13 @@ docs/error-analytics-plan.md. Any authenticated user may search (no staff
 gate — matches KWIC/Frequency/Collocations/N-grams; no precedent in this
 codebase for treating error data as more sensitive than raw corpus text).
 
-`error_code`/`category` are repeated query params, matching the existing
-`corpus_ids` convention: `?error_code=ktinf&error_code=ejk&category=
-gramatikal`. error_code (OR) is the main filter — one or more specific
-leaf error codes; category (AND) is the secondary filter — one or more
-taxonomy hierarchy codes at any depth, narrowing the match to leaves under
-ALL of them.
+`error_code` is a repeated query param, matching the existing `corpus_ids`
+convention: `?error_code=ktinf&error_code=gramatikal`. Each value is a
+taxonomy code at any depth — a specific leaf code or a whole category —
+and the set is OR-combined: checking a category in the tree picker
+selects every leaf underneath it, checking several nodes (leaf or
+category, any branch) unions all of them. See ErrorFilter in
+dataplane/repositories/base.py.
 """
 
 from typing import Annotated
@@ -38,7 +39,6 @@ async def search_error_frequency(
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     error_code: Annotated[list[str] | None, Query()] = None,
-    category: Annotated[list[str] | None, Query()] = None,
     q: str | None = None,
     match: MatchMode = MatchMode.CONTAINS,
     sort: str = "count",
@@ -53,8 +53,7 @@ async def search_error_frequency(
 
     result = await service.frequency(
         corpus_ids=corpus_ids,
-        error_codes=error_code,
-        categories=category,
+        codes=error_code,
         query=q,
         match_mode=match,
         sort=sort,
@@ -78,15 +77,13 @@ async def search_epic(
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     error_code: Annotated[list[str] | None, Query()] = None,
-    category: Annotated[list[str] | None, Query()] = None,
     window: int = 5,
     page: int = 1,
     per_page: int = 50,
 ) -> EpicSearchResponse:
     result = await service.occurrences(
         corpus_ids=corpus_ids,
-        error_codes=error_code,
-        categories=category,
+        codes=error_code,
         window=window,
         page=page,
         per_page=per_page,
