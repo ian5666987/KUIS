@@ -31,6 +31,32 @@ CORPUS_XML = """<document>
 
 PLAIN_TEXT = "saya suka nasi dan saya suka teh"
 
+# A <segment> nested inside another <segment> — the data's way of
+# representing overlapping errors (docs/error-analytics-plan.md), modeled
+# after the real pattern in info/KUIS2023FUA201-Eror.xml. Outer segment
+# uses capital 'Correction' (the one rule the corrected token stream has
+# always honored); nested segment has no parent= attribute, mirroring real
+# sample data where the explicit attribute and structural nesting diverge.
+NESTED_CORPUS_XML = """<document>
+  <header><textfile>t</textfile><lang>indonesian</lang></header>
+  <body>
+saya suka <segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' Correction='nasi goreng'>goreng <segment id='1' features='eror;ejaan;ejk'>nasi</segment></segment> sekali
+  </body>
+</document>"""
+
+# Same nested shape, but the outer segment's correction is spelled with a
+# lowercase attribute — real data uses both castings on sibling segments.
+# The token corrected-stream only ever reads capital 'Correction' (an
+# already-known, deliberately-unchanged quirk); ErrorAnnotation.correction_
+# text must still resolve it, since that's display text, not token
+# generation.
+LOWERCASE_CORRECTION_XML = """<document>
+  <header><textfile>t</textfile><lang>indonesian</lang></header>
+  <body>
+Sayang <segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' correction='Tuti sayang'>tuti</segment>
+  </body>
+</document>"""
+
 
 class ExplorerTestCase(TestCase):
     @classmethod
@@ -1288,3 +1314,300 @@ class ProfileApiTests(TestCase):
         self.assertFalse(body['is_staff'])
         self.assertEqual(body['documents_uploaded'], 2)
         self.assertEqual(body['corpora_created'], 1)
+
+
+class CorpusParsingTests(TestCase):
+    """main/corpus_parsing.py's nested-segment fix + extract_error_annotations
+    (docs/error-analytics-plan.md). The pre-fix bug: only direct children of
+    <body> were visited, so a <segment> nested inside another <segment> — the
+    data's way of representing overlapping errors — contributed nothing to
+    either stream. NESTED_CORPUS_XML/LOWERCASE_CORRECTION_XML are modeled on
+    the real pattern in info/KUIS2023FUA201-Eror.xml (cross-checked directly
+    in LoadErrorTaxonomyCommandTests below)."""
+
+    def test_nested_segment_text_reaches_the_original_stream(self):
+        from .corpus_parsing import extract_word_streams
+
+        original_words, corrected_words = extract_word_streams(NESTED_CORPUS_XML)
+
+        self.assertEqual(original_words, ['saya', 'suka', 'goreng', 'nasi', 'sekali'])
+        self.assertEqual(corrected_words, ['saya', 'suka', 'nasi', 'goreng', 'sekali'])
+
+    def test_corrected_stream_stays_capital_correction_only(self):
+        # Pins the pre-existing, deliberately-unchanged quirk (decision 1,
+        # docs/error-analytics-plan.md): a segment correction spelled with
+        # a lowercase attribute never reaches the token corrected-stream,
+        # even though extract_error_annotations resolves it fine below for
+        # display (correction_text is a separate concern from tokens).
+        from .corpus_parsing import extract_word_streams
+
+        original_words, corrected_words = extract_word_streams(LOWERCASE_CORRECTION_XML)
+
+        self.assertEqual(original_words, ['sayang', 'tuti'])
+        self.assertEqual(corrected_words, ['sayang'])
+
+    def test_nested_annotation_span_is_contained_in_outer_span(self):
+        from .corpus_parsing import extract_error_annotations
+
+        annotations = extract_error_annotations(NESTED_CORPUS_XML)
+        self.assertEqual(len(annotations), 2)
+
+        inner = next(a for a in annotations if a['source_segment_id'] == '1')
+        outer = next(a for a in annotations if a['source_segment_id'] == '3')
+
+        self.assertEqual((outer['start_position'], outer['end_position']), (2, 4))
+        self.assertEqual(outer['original_text'], 'goreng nasi')
+        self.assertEqual(outer['correction_text'], 'nasi goreng')
+        self.assertEqual(outer['raw_features'], 'eror;gramatikal;frasa-nomina;urtfn')
+
+        self.assertEqual((inner['start_position'], inner['end_position']), (3, 4))
+        self.assertEqual(inner['original_text'], 'nasi')
+        self.assertEqual(inner['raw_features'], 'eror;ejaan;ejk')
+
+        # Strictly contained, not just overlapping — position-consistent
+        # with the original-stream fix above by construction.
+        self.assertGreaterEqual(inner['start_position'], outer['start_position'])
+        self.assertLessEqual(inner['end_position'], outer['end_position'])
+
+    def test_annotation_reads_correction_case_insensitively(self):
+        from .corpus_parsing import extract_error_annotations
+
+        annotations = extract_error_annotations(LOWERCASE_CORRECTION_XML)
+        self.assertEqual(len(annotations), 1)
+        self.assertEqual(annotations[0]['correction_text'], 'Tuti sayang')
+
+    def test_non_structured_content_yields_no_annotations(self):
+        from .corpus_parsing import extract_error_annotations
+
+        self.assertEqual(extract_error_annotations(PLAIN_TEXT), [])
+
+    def test_existing_top_level_segment_fixture_is_unaffected(self):
+        # Regression pin: the original (non-nested) CORPUS_XML fixture used
+        # throughout this file must tokenize identically to before the fix.
+        from .corpus_parsing import extract_word_streams
+
+        original_words, corrected_words = extract_word_streams(CORPUS_XML)
+        self.assertEqual(len(original_words), 10)
+        self.assertIn('tetapi', corrected_words)
+        self.assertNotIn('tapi', corrected_words)
+
+
+class ErrorAnnotationWorkerTaskTests(TestCase):
+    """worker/tasks/error_annotations.py (docs/error-analytics-plan.md) —
+    extraction + Tier-2 aggregation, chained from
+    worker/tasks/indexing.py::index_document. Loads the real taxonomy
+    (info/error.xml) so raw_features actually resolve, same as production."""
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+    def test_resolves_taxonomy_nodes_and_positions(self):
+        from .models import ErrorAnnotation
+
+        doc = Document.objects.create(title='n.xml', content=NESTED_CORPUS_XML)
+        index_document(doc.id)  # chains extract_document_error_annotations internally
+
+        annotations = ErrorAnnotation.objects.filter(document=doc).order_by('start_position')
+        self.assertEqual(annotations.count(), 2)
+
+        outer = annotations.get(source_segment_id='3')
+        self.assertEqual(outer.taxonomy_node.code, 'urtfn')
+        self.assertEqual(outer.taxonomy_node.path, 'eror;gramatikal;frasa-nomina;urtfn')
+
+        # Position-consistency by construction: the outer span's Token rows
+        # (mode=original) are exactly the annotation's text.
+        tokens = list(
+            doc.tokens.filter(mode='original', position__gte=outer.start_position, position__lt=outer.end_position)
+            .order_by('position').values_list('word_type__form', flat=True)
+        )
+        self.assertEqual(tokens, ['goreng', 'nasi'])
+
+    def test_parent_resolution_uses_explicit_attribute_not_structural_nesting(self):
+        from .models import ErrorAnnotation
+
+        doc = Document.objects.create(title='n.xml', content=NESTED_CORPUS_XML)
+        index_document(doc.id)
+
+        inner = ErrorAnnotation.objects.get(document=doc, source_segment_id='1')
+        # Structurally nested inside segment 3, but the fixture deliberately
+        # omits parent='1' (mirrors real info/KUIS2023FUA201-Eror.xml's
+        # segment id='6', which is nested but has no parent= attribute
+        # either) — so the FK stays unresolved rather than inferred from
+        # structure.
+        self.assertIsNone(inner.parent_id)
+
+    def test_unresolved_raw_features_does_not_fail_the_batch(self):
+        from .models import ErrorAnnotation
+
+        content = (
+            "<document><header><textfile>t</textfile><lang>id</lang></header><body>"
+            "saya <segment id='1' features='eror;doesnotexist'>suka</segment> teh"
+            "</body></document>"
+        )
+        doc = Document.objects.create(title='u.xml', content=content)
+        index_document(doc.id)
+
+        annotation = ErrorAnnotation.objects.get(document=doc)
+        self.assertIsNone(annotation.taxonomy_node_id)
+        self.assertEqual(annotation.raw_features, 'eror;doesnotexist')
+
+    def test_compute_document_error_freq_excludes_inactive_and_unresolved(self):
+        from .models import DocumentErrorFreq
+
+        content = (
+            "<document><header><textfile>t</textfile><lang>id</lang></header><body>"
+            "<segment id='1' features='eror;ejaan;ejk' state='inactive'>a</segment> "
+            "<segment id='2' features='eror;doesnotexist'>b</segment> "
+            "<segment id='3' features='eror;ejaan;ejk'>c</segment>"
+            "</body></document>"
+        )
+        doc = Document.objects.create(title='s.xml', content=content)
+        index_document(doc.id)
+
+        freqs = {f.taxonomy_node.code: f.count for f in DocumentErrorFreq.objects.filter(document=doc)}
+        self.assertEqual(freqs, {'ejk': 1})  # only the active + resolved segment (id=3) counted
+
+    def test_reextraction_replaces_rather_than_duplicates(self):
+        from .models import ErrorAnnotation
+        from worker.tasks.error_annotations import extract_document_error_annotations
+
+        doc = Document.objects.create(title='n.xml', content=NESTED_CORPUS_XML)
+        index_document(doc.id)
+        first_count = ErrorAnnotation.objects.filter(document=doc).count()
+
+        extract_document_error_annotations(doc.id)  # same content, run again
+
+        self.assertEqual(ErrorAnnotation.objects.filter(document=doc).count(), first_count)
+
+    def test_index_document_chains_annotations_before_freq_via_delay(self):
+        # Pins the ordering fix: compute_document_error_freq is chained
+        # from INSIDE extract_document_error_annotations, not fired as a
+        # second independent .delay() from index_document — so by the time
+        # index_document.delay() returns under CELERY_TASK_ALWAYS_EAGER=1,
+        # both ErrorAnnotation and DocumentErrorFreq exist.
+        from .models import DocumentErrorFreq, ErrorAnnotation
+
+        doc = Document.objects.create(title='n.xml', content=NESTED_CORPUS_XML)
+        index_document.delay(doc.id)
+
+        self.assertTrue(ErrorAnnotation.objects.filter(document=doc).exists())
+        self.assertTrue(DocumentErrorFreq.objects.filter(document=doc).exists())
+
+
+class LoadErrorTaxonomyCommandTests(TestCase):
+    """main/management/commands/load_error_taxonomy.py
+    (docs/error-analytics-plan.md) — loads info/error.xml, the real
+    taxonomy file, not a test-only fixture."""
+
+    def test_idempotent_rerun(self):
+        from .models import ErrorTaxonomyNode
+
+        call_command('load_error_taxonomy', stdout=StringIO())
+        first_count = ErrorTaxonomyNode.objects.count()
+
+        call_command('load_error_taxonomy', stdout=StringIO())
+        self.assertEqual(ErrorTaxonomyNode.objects.count(), first_count)
+
+    def test_path_top_category_and_leaf_computed_correctly(self):
+        from .models import ErrorTaxonomyNode
+
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+        ktinf = ErrorTaxonomyNode.objects.get(code='ktinf')
+        self.assertEqual(ktinf.path, 'eror;leksikal;kata;ktinf')
+        self.assertTrue(ktinf.is_leaf)
+        self.assertEqual(ktinf.top_category, 'leksikal')
+
+        gramatikal = ErrorTaxonomyNode.objects.get(code='gramatikal')
+        self.assertFalse(gramatikal.is_leaf)
+        self.assertEqual(gramatikal.top_category, 'gramatikal')  # a depth-1 node is its own top_category
+
+        root = ErrorTaxonomyNode.objects.get(code='eror')
+        self.assertIsNone(root.parent)
+        self.assertFalse(root.is_leaf)
+
+    def test_every_real_sample_segment_feature_resolves(self):
+        # Cross-check against actual uploaded-document data, not just the
+        # taxonomy file in isolation.
+        from django.conf import settings
+
+        from .corpus_parsing import extract_error_annotations
+        from .models import ErrorTaxonomyNode
+
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+        sample_path = settings.BASE_DIR / 'info' / 'KUIS2023FUA201-Eror.xml'
+        annotations = extract_error_annotations(sample_path.read_text(encoding='utf-8'))
+        self.assertTrue(annotations)  # the sample actually has segments
+
+        known_paths = set(ErrorTaxonomyNode.objects.values_list('path', flat=True))
+        for annotation in annotations:
+            self.assertIn(annotation['raw_features'], known_paths)
+
+
+class BackfillErrorAnnotationsCommandTests(TestCase):
+    """main/management/commands/backfill_error_annotations.py — mirrors
+    BackfillContentHashCommandTests' shape for the error-annotation
+    equivalent (docs/error-analytics-plan.md)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+    def test_backfills_only_documents_missing_annotations_by_default(self):
+        from .models import ErrorAnnotation
+
+        already_processed = Document.objects.create(title='a.xml', content=NESTED_CORPUS_XML)
+        index_document(already_processed.id)
+        self.assertTrue(ErrorAnnotation.objects.filter(document=already_processed).exists())
+
+        # Distinct content — content_hash is globally unique, so this can't
+        # reuse NESTED_CORPUS_XML.
+        never_processed = Document.objects.create(title='b.xml', content=LOWERCASE_CORRECTION_XML)
+        # Simulate a pre-feature document: Token rows exist (indexed before
+        # this feature shipped) but no ErrorAnnotation rows yet.
+        index_document(never_processed.id)
+        ErrorAnnotation.objects.filter(document=never_processed).delete()
+
+        out = StringIO()
+        call_command('backfill_error_annotations', stdout=out)
+
+        self.assertTrue(ErrorAnnotation.objects.filter(document=never_processed).exists())
+        self.assertIn('b.xml', out.getvalue())
+        self.assertNotIn('a.xml', out.getvalue())  # already had annotations — skipped
+
+    def test_all_flag_recomputes_every_document(self):
+        doc = Document.objects.create(title='a.xml', content=NESTED_CORPUS_XML)
+        index_document(doc.id)
+
+        out = StringIO()
+        call_command('backfill_error_annotations', '--all', stdout=out)
+
+        self.assertIn('a.xml', out.getvalue())
+
+
+class RetokenizeDryRunTests(TestCase):
+    """retokenize --dry-run (docs/error-analytics-plan.md) — reviews the
+    nested-segment tokenizer fix's impact on corpus_db before writing
+    anything, the step this project's prior schema migrations already use
+    before touching real data."""
+
+    def test_dry_run_writes_nothing(self):
+        doc = Document.objects.create(
+            title='n.xml', content=NESTED_CORPUS_XML, token_count=0, token_count_corrected=0,
+        )
+        # Deliberately NOT indexed — token_count stays at the stale value
+        # above, simulating a document indexed before the tokenizer fix.
+
+        out = StringIO()
+        call_command('retokenize', '--dry-run', stdout=out)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.token_count, 0)  # untouched
+        self.assertEqual(doc.tokens.count(), 0)  # no Token rows written
+
+        output = out.getvalue()
+        self.assertIn('n.xml', output)
+        self.assertIn('(+5)', output)  # 5 original tokens recomputed from a stale 0
+        self.assertIn('Dry run only', output)

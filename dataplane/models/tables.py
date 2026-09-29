@@ -28,10 +28,16 @@ fails loudly instead of these queries silently breaking or misreading data.
 Phase 5: `token.word` (varchar) is GONE, replaced by `token.word_type_id`
 (architecture plan §2, Tier 1 — "Token.word_type FK replacing Token.word").
 `word_type`, `document_word_freq`, `document_ngram` (Tier 2) added.
+
+docs/error-analytics-plan.md: `error_taxonomy_node`, `error_annotation`,
+`document_error_freq` added — mirrors main.models.{ErrorTaxonomyNode,
+ErrorAnnotation, DocumentErrorFreq} column-for-column, same as every other
+table here.
 """
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Integer,
@@ -70,6 +76,11 @@ corpus = Table(
     Column("description", Text),
     Column("created_by_id", BigInteger, nullable=True),
     Column("created_at", DateTime(timezone=True)),
+    # Pre-existing drift, fixed in passing while touching this file for
+    # docs/error-analytics-plan.md: added by main/migrations/0011_corpus_
+    # is_public.py but never mirrored here — exactly the trap this file's
+    # own module docstring (and test_schema_drift.py) warns about.
+    Column("is_public", Boolean),
 )
 
 corpus_documents = Table(
@@ -115,5 +126,43 @@ document_ngram = Table(
     Column("n", SmallInteger),
     Column("word_type_ids", JSON),
     Column("mode", String(10)),
+    Column("count", Integer),
+)
+
+error_taxonomy_node = Table(
+    "main_errortaxonomynode",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("code", String(50)),
+    Column("parent_id", BigInteger, nullable=True),
+    Column("path", String(255)),
+    Column("gloss", Text),
+    Column("is_leaf", Boolean),
+    Column("top_category", String(50), nullable=True),
+)
+
+error_annotation = Table(
+    "main_errorannotation",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("document_id", BigInteger),
+    Column("taxonomy_node_id", BigInteger, nullable=True),
+    Column("raw_features", String(255)),
+    Column("parent_id", BigInteger, nullable=True),
+    Column("source_segment_id", String(50)),
+    Column("start_position", Integer),
+    Column("end_position", Integer),
+    Column("original_text", Text),
+    Column("correction_text", Text),
+    Column("state", String(20)),
+    Column("comment", Text),
+)
+
+document_error_freq = Table(
+    "main_documenterrorfreq",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("document_id", BigInteger),
+    Column("taxonomy_node_id", BigInteger),
     Column("count", Integer),
 )

@@ -10,4 +10,4 @@
 # these imports, which surfaces as a very unhelpful `KeyError: '<task
 # name>'` deep in Celery's consumer, not an import error, when the worker
 # actually receives a message for a task it doesn't know about.
-from . import aggregates, indexing  # noqa: F401
+from . import aggregates, error_annotations, indexing  # noqa: F401

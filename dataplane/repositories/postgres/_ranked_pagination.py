@@ -29,24 +29,35 @@ async def paginate_sql_source(
     direction: SortDirection,
     limit: int,
     offset: int,
+    case_sensitive: bool = True,
 ) -> tuple[list[RankedRow], int, int]:
     """For sources where `item` is a real column the database can filter on
     directly (Tier 0's self-join CONCAT, Tier 2's word-frequency JOIN to
-    WordType.form). Returns (page_rows, result_count, type_count)."""
+    WordType.form). Returns (page_rows, result_count, type_count).
+
+    `case_sensitive=False` (docs/error-analytics-plan.md, Error Frequency)
+    matches the lowercased `query` term against `func.lower(item)` instead
+    of `item` directly, while still SELECTing/returning `item`'s original
+    casing — for a source whose item text preserves case on purpose (an
+    erroneous phrase's original casing is signal, not noise, for codes like
+    `ejk`). Every existing caller (word frequency/collocations/n-grams)
+    already stores `item` pre-lowercased by the tokenizer, so the default
+    leaves their behavior byte-for-byte unchanged."""
     type_count = (await session.execute(select(func.count()).select_from(source))).scalar_one()
 
     filtered = select(source.c.item, source.c.count)
+    match_column = source.c.item if case_sensitive else func.lower(source.c.item)
 
     if query:
         term = query.strip().lower()
         if match_mode == MatchMode.STARTS:
-            filtered = filtered.where(source.c.item.startswith(term))
+            filtered = filtered.where(match_column.startswith(term))
         elif match_mode == MatchMode.ENDS:
-            filtered = filtered.where(source.c.item.endswith(term))
+            filtered = filtered.where(match_column.endswith(term))
         elif match_mode == MatchMode.EXACT:
-            filtered = filtered.where(source.c.item == term)
+            filtered = filtered.where(match_column == term)
         else:
-            filtered = filtered.where(source.c.item.contains(term))
+            filtered = filtered.where(match_column.contains(term))
 
     result_count = (await session.execute(select(func.count()).select_from(filtered.subquery()))).scalar_one()
 

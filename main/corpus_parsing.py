@@ -15,23 +15,89 @@ def _flat_tokenize_both(content):
     return words, list(words)
 
 
-def _walk_body(body, original_words, corrected_words):
-    def add_text(text):
+def _walk_body(body, original_words, corrected_words, annotations=None):
+    """Single recursive walk covering both the token streams and (when
+    `annotations` is a list) error-annotation extraction, so a segment's
+    ErrorAnnotation.start_position/end_position always land exactly where
+    the original-stream Token.position for that span will — by
+    construction, not by two independently-maintained walkers that could
+    drift (docs/error-analytics-plan.md).
+
+    Fixes the historical bug where only direct children of <body> were
+    visited: a <segment> nested inside another <segment> (the data's way of
+    representing overlapping errors — e.g. a phrase-level word-order error
+    containing a word-level spelling error, see
+    info/KUIS2023FUA201-Eror.xml) used to contribute nothing to either
+    stream. Retokenizing real documents after this change shifts token
+    counts/positions for any document that has nested segments — expected,
+    see the retokenize --dry-run step in docs/error-analytics-plan.md.
+    """
+
+    def add_both(text):
         words = _tokenize(text)
         original_words.extend(words)
         corrected_words.extend(words)
 
-    add_text(body.text)
+    def add_original(text):
+        original_words.extend(_tokenize(text))
 
-    for elem in body:
-        if elem.tag == 'segment':
-            original_words.extend(_tokenize(elem.text))
-            correction = elem.get('Correction', '')
-            corrected_words.extend(_tokenize(correction))
-        else:
-            add_text(''.join(elem.itertext()))
+    def record_annotation(segment, start, end):
+        if annotations is None:
+            return
+        annotations.append({
+            'source_segment_id': segment.get('id', ''),
+            'parent_segment_id': segment.get('parent', ''),
+            'raw_features': segment.get('features', ''),
+            'start_position': start,
+            'end_position': end,
+            'original_text': ''.join(segment.itertext()),
+            # Read case-insensitively here (unlike the corrected token
+            # stream below) — this only affects display text, not token
+            # generation, and real data uses both castings inconsistently
+            # on sibling segments (info/KUIS2023FUA201-Eror.xml has both
+            # `Correction=` and `correction=`).
+            'correction_text': segment.get('Correction') or segment.get('correction') or '',
+            'state': segment.get('state', 'active'),
+            'comment': segment.get('comment', ''),
+        })
 
-        add_text(elem.tail)
+    def walk_segment(node):
+        """Inside a <segment>: text (including nested segments' text) feeds
+        the ORIGINAL stream only — mirrors the pre-fix rule that a
+        segment's own text never touches the corrected stream, just
+        extended to actually reach nested content instead of silently
+        dropping it. The corrected stream is fed exclusively by the
+        OUTERMOST segment's own Correction value (added once, by `walk`
+        below) — a nested segment's own Correction is still captured on its
+        ErrorAnnotation row for display, but the outer segment's correction
+        already stands in for the whole span in the corrected reading, so
+        it is not added again here."""
+        add_original(node.text)
+        for child in node:
+            if child.tag == 'segment':
+                start = len(original_words)
+                walk_segment(child)
+                record_annotation(child, start, len(original_words))
+            else:
+                add_original(''.join(child.itertext()))
+            add_original(child.tail)
+
+    def walk(node):
+        add_both(node.text)
+        for child in node:
+            if child.tag == 'segment':
+                start = len(original_words)
+                walk_segment(child)
+                record_annotation(child, start, len(original_words))
+                # UNCHANGED: capital 'Correction' only, top-level segments
+                # only — the one rule already verified pre-fix, kept
+                # exactly as-is (docs/error-analytics-plan.md).
+                corrected_words.extend(_tokenize(child.get('Correction', '')))
+            else:
+                walk(child)
+            add_both(child.tail)
+
+    walk(body)
 
 
 def looks_like_structured_xml(content):
@@ -75,11 +141,36 @@ def extract_word_streams(content):
     """Returns (original_words, corrected_words) tokenized from a document's content.
 
     For well-formed corpus XML with a <body>, plain text contributes equally to both
-    streams, and each <segment> contributes its inner text to the original stream and
-    its Correction attribute (if non-empty) to the corrected stream. Falls back to flat
-    word tokenization of the raw content (identical for both streams) when the content
-    isn't parseable XML with a <body> element.
+    streams, and each <segment> contributes its inner text (nested segments included)
+    to the original stream and its Correction attribute (if non-empty) to the
+    corrected stream. Falls back to flat word tokenization of the raw content
+    (identical for both streams) when the content isn't parseable XML with a <body>
+    element.
     """
     original_words, corrected_words, _ = parse_document(content)
 
     return original_words, corrected_words
+
+
+def extract_error_annotations(content):
+    """Returns a list of raw annotation dicts (source_segment_id,
+    parent_segment_id, raw_features, start_position, end_position,
+    original_text, correction_text, state, comment) — one per <segment
+    features=...> in `content`, nested or not. Empty for non-structured
+    content (no <body>).
+
+    Uses the same recursive walk as extract_word_streams, so
+    start_position/end_position land exactly where Token.position (mode=
+    original) will, by construction (docs/error-analytics-plan.md)."""
+    if not looks_like_structured_xml(content):
+        return []
+
+    root = ET.fromstring(content)
+    body = root.find('body')
+
+    original_words = []
+    corrected_words = []
+    annotations = []
+    _walk_body(body, original_words, corrected_words, annotations=annotations)
+
+    return annotations

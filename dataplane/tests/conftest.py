@@ -48,6 +48,29 @@ CORPUS_XML = """<document>
 
 PLAIN_TEXT = "saya suka nasi goreng dan saya suka nasi goreng lagi"
 
+# A <segment> nested inside another <segment> — the data's way of
+# representing overlapping errors (docs/error-analytics-plan.md); a
+# top-level segment with an unresolvable features path (taxonomy drift /
+# annotator typo); and a segment with real uppercase text (Error Frequency
+# groups/displays phrase text verbatim, but its search filter must still
+# match case-insensitively) — all real cases error-analytics tests need.
+# Kept as a SEPARATE corpus/document from CORPUS_XML/PLAIN_TEXT above (not
+# mixed into "Test corpus") so error-analytics fixtures never perturb the
+# token positions/counts every other feature's tests already assert
+# against.
+#
+# Annotations once indexed: id=1 (ejk, "nasi", nested in id=3), id=3
+# (urtfn, "goreng nasi", correction "nasi goreng"), id=4 (unresolved,
+# "lagi"), id=5 (ejk, "Sayang").
+ERROR_CORPUS_XML = """<document>
+  <header><textfile>error-sample</textfile><lang>indonesian</lang></header>
+  <body>
+saya suka <segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' Correction='nasi goreng'>goreng <segment id='1' features='eror;ejaan;ejk'>nasi</segment></segment> sekali
+<segment id='4' features='eror;doesnotexist'>lagi</segment>
+<segment id='5' features='eror;ejaan;ejk'>Sayang</segment> tuti
+  </body>
+</document>"""
+
 
 @pytest.fixture(scope="module")
 def seeded_corpus():
@@ -59,6 +82,7 @@ def seeded_corpus():
         )
 
     call_command("migrate", "--noinput", verbosity=0)
+    call_command("load_error_taxonomy", verbosity=0)
 
     from main.models import Corpus, Document
     from worker.tasks.indexing import index_document
@@ -71,16 +95,29 @@ def seeded_corpus():
     corpus = Corpus.objects.create(name="Test corpus")
     corpus.documents.set([annotated, plain])
 
-    # Tokenization (and Tier-2 aggregate computation) is no longer automatic
-    # on save (architecture plan §5 removed the post_save signal) — .delay()
-    # runs synchronously because CELERY_TASK_ALWAYS_EAGER=1 is set for this
-    # test run, exercising the real indexing + aggregate tasks rather than a
+    # Separate corpus — see ERROR_CORPUS_XML's comment above.
+    error_doc = Document.objects.create(title="error-sample.xml", content=ERROR_CORPUS_XML)
+    error_corpus = Corpus.objects.create(name="Error Analytics Test Corpus")
+    error_corpus.documents.set([error_doc])
+
+    # Tokenization (and Tier-2 aggregate computation, and now error-
+    # annotation extraction) is no longer automatic on save (architecture
+    # plan §5 removed the post_save signal) — .delay() runs synchronously
+    # because CELERY_TASK_ALWAYS_EAGER=1 is set for this test run,
+    # exercising the real indexing + aggregate tasks rather than a
     # hand-rolled test-only setup path that could drift from what
     # production actually populates.
     index_document.delay(annotated.id)
     index_document.delay(plain.id)
+    index_document.delay(error_doc.id)
 
-    return {"corpus_id": corpus.id, "doc1_id": annotated.id, "doc2_id": plain.id}
+    return {
+        "corpus_id": corpus.id,
+        "doc1_id": annotated.id,
+        "doc2_id": plain.id,
+        "error_corpus_id": error_corpus.id,
+        "error_doc_id": error_doc.id,
+    }
 
 
 @pytest.fixture

@@ -3,8 +3,8 @@ FastAPI data plane — KWIC, frequency, n-gram, collocation, error analytics
 (architecture plan §1). Phase 2 ported fast-KWIC. Phase 4 adds word
 frequency, collocations, and n-grams, all three sharing one query builder
 (dataplane/repositories/postgres/_ranked_query.py) at different values of
-n. error_analytics is the one router still missing — Phase 6, blocked on
-the error-type taxonomy.
+n. error_analytics + taxonomy (docs/error-analytics-plan.md) add Error
+Frequency and EPIC (Error Phrase In Context).
 
 Run locally with: uvicorn dataplane.main:app --reload --port 8001
 """
@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dataplane.core.config import settings
-from dataplane.routers import collocations, frequency, health, kwic, ngrams, whoami
+from dataplane.routers import collocations, error_analytics, frequency, health, kwic, ngrams, taxonomy, whoami
 
 app = FastAPI(
     title="KUIS Data Plane",
@@ -37,3 +37,5 @@ app.include_router(kwic.router)
 app.include_router(frequency.router)
 app.include_router(collocations.router)
 app.include_router(ngrams.router)
+app.include_router(error_analytics.router)
+app.include_router(taxonomy.router)

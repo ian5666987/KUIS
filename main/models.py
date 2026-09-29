@@ -175,6 +175,88 @@ class DocumentNgram(models.Model):
         ]
 
 
+class ErrorTaxonomyNode(models.Model):
+    """The error-type tree from info/error.xml (docs/error-analytics-plan.md).
+    Reference data, not user data — loaded/reloaded wholesale by the
+    `load_error_taxonomy` management command, never edited row-by-row.
+
+    `path` is stored in the exact semicolon-joined format the corpus XML's
+    `<segment features=...>` attribute uses ("eror;gramatikal;frasa-nomina;
+    nomafx"), so resolving an annotation's raw_features to a node is a
+    single indexed equality lookup, and category/subcategory filtering is a
+    substring-containment check against this same column — see
+    dataplane/repositories/postgres/_error_query.py. This format is
+    load-bearing for that lookup and must not change independently of the
+    XML it mirrors."""
+
+    code = models.CharField(max_length=50, unique=True)
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
+    path = models.CharField(max_length=255, unique=True)
+    gloss = models.TextField(blank=True)
+    is_leaf = models.BooleanField(default=False)
+    # Depth-1 ancestor's code (e.g. "gramatikal"), set by load_error_taxonomy
+    # at load time — the summary view's grouping key, computed once here
+    # rather than re-derived from `path` on every query.
+    top_category = models.CharField(max_length=50, null=True, blank=True)
+
+    def __str__(self):
+        return self.code
+
+
+class ErrorAnnotation(models.Model):
+    """One row per <segment features=...> in a document's content — the
+    source-of-truth occurrence table (docs/error-analytics-plan.md),
+    extracted by worker/tasks/error_annotations.py via
+    main/corpus_parsing.py::extract_error_annotations. `taxonomy_node` is
+    nullable and `raw_features` is kept verbatim so an unresolvable code
+    (annotator typo, taxonomy drift) doesn't fail extraction for the rest
+    of the document. `parent` mirrors the segment's own `parent=` XML
+    attribute (nested segments represent overlapping errors), not
+    structural nesting — the two can diverge in real data."""
+
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='error_annotations')
+    taxonomy_node = models.ForeignKey(ErrorTaxonomyNode, on_delete=models.SET_NULL, null=True, blank=True, related_name='annotations')
+    raw_features = models.CharField(max_length=255)
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
+    source_segment_id = models.CharField(max_length=50, blank=True)
+    start_position = models.IntegerField()
+    end_position = models.IntegerField()
+    original_text = models.TextField()
+    correction_text = models.TextField(blank=True)
+    state = models.CharField(max_length=20, default='active')
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['document', 'taxonomy_node']),
+            models.Index(fields=['document', 'start_position']),
+        ]
+
+    def __str__(self):
+        return f"{self.raw_features} ({self.document_id}:{self.start_position}-{self.end_position})"
+
+
+class DocumentErrorFreq(models.Model):
+    """Precomputed per-document error-type counts, mirroring DocumentWordFreq
+    — used only by the summary view (SUM ... GROUP BY top_category).
+    Error Frequency (grouping by the erroneous phrase's own text) reads
+    ErrorAnnotation directly instead — see docs/error-analytics-plan.md
+    Part 3 for why: unlike vocabulary, distinct phrase text is not a
+    bounded-enough dimension for this aggregate to meaningfully shrink."""
+
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='error_freqs')
+    taxonomy_node = models.ForeignKey(ErrorTaxonomyNode, on_delete=models.CASCADE)
+    count = models.IntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['document', 'taxonomy_node'], name='uniq_doc_errorfreq'),
+        ]
+        indexes = [
+            models.Index(fields=['document']),
+        ]
+
+
 def build_tokens(document):
     """(Re)computes the Token rows for a document from its content, for both the
     original and corrected word streams. Does not save the document itself.

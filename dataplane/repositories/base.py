@@ -169,25 +169,107 @@ class NgramRepository(ABC):
 
 
 # --- Error Analytics ------------------------------------------------------
-# The most provisional of the five — an entirely new feature (no Django view
-# to port), blocked on a documented error-type taxonomy (docs/ONBOARDING.md
-# §3/§9 in this repo). Shape below is a placeholder guess at "counts grouped
-# by the segment `features` tag path" (e.g. "eror;leksikal;kata;ktinf" from
-# main/corpus_parsing.py's XML schema) — expect this to change once the
-# taxonomy exists and Phase 6 actually builds it.
+# Error Frequency + EPIC (Error Phrase In Context) — see
+# docs/error-analytics-plan.md for the full design. Two filter axes, shared
+# by every method below:
+#   - error_codes: OR — matches ANY of these leaf taxonomy codes (e.g.
+#     ["ktinf", "ejk"]), same OR semantics as every other multi-select
+#     filter in this app.
+#   - category_paths: AND — the matched leaf must be a descendant of EVERY
+#     listed hierarchy code, at any depth (e.g. ["gramatikal", "frasa-
+#     nomina"] narrows to leaves under BOTH) — drill-down narrowing,
+#     implemented via ErrorTaxonomyNode.path containment (see
+#     postgres/_error_query.py).
+# Both None/empty means no filter — every resolved+active annotation
+# matches.
+
+
+@dataclass(frozen=True)
+class ErrorFilter:
+    error_codes: list[str] | None = None
+    category_paths: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class ErrorFrequencyRow:
+    phrase: str  # the erroneous span's own original_text, verbatim (not lowercased — case is signal for some codes, e.g. ejk)
+    frequency: int
+
+
+@dataclass(frozen=True)
+class ErrorFrequencyPage:
+    rows: list[ErrorFrequencyRow]
+    result_count: int  # rows matching the filter, before pagination
+    type_count: int  # distinct phrases with NO filter applied
+
+
+@dataclass(frozen=True)
+class ErrorOccurrence:
+    document_id: int
+    document_title: str
+    left: list[str]
+    keyword: list[str]
+    right: list[str]
+    error_code: str
+    category_path: str
+    correction_text: str
 
 
 @dataclass(frozen=True)
 class ErrorCategoryCount:
-    category_path: str
+    category: str  # a top_category label (e.g. "gramatikal")
     count: int
+
+
+@dataclass(frozen=True)
+class ErrorSummary:
+    total: int
+    by_category: list[ErrorCategoryCount]
 
 
 class ErrorAnalyticsRepository(ABC):
     @abstractmethod
-    async def category_counts(
-        self, document_ids: list[int], limit: int, offset: int
-    ) -> list[ErrorCategoryCount]: ...
+    async def frequency(
+        self,
+        document_ids: list[int],
+        filter: ErrorFilter,
+        query: str | None,
+        match_mode: MatchMode,
+        sort: str,
+        direction: SortDirection,
+        limit: int,
+        offset: int,
+    ) -> ErrorFrequencyPage: ...
 
     @abstractmethod
-    async def count_categories(self, document_ids: list[int]) -> int: ...
+    async def occurrences(
+        self, document_ids: list[int], filter: ErrorFilter, window: int, limit: int, offset: int
+    ) -> list[ErrorOccurrence]: ...
+
+    @abstractmethod
+    async def count_occurrences(self, document_ids: list[int], filter: ErrorFilter) -> int: ...
+
+    @abstractmethod
+    async def summary(self, document_ids: list[int]) -> ErrorSummary: ...
+
+
+# --- Taxonomy --------------------------------------------------------------
+# Reference data (info/error.xml, loaded into ErrorTaxonomyNode by
+# `load_error_taxonomy` — Django-owned, FastAPI reads read-only), not a
+# computation — kept as its own interface since other future features may
+# also want the tree, same reasoning CollocationRepository is kept separate
+# from NgramRepository.
+
+
+@dataclass(frozen=True)
+class TaxonomyNodeOut:
+    code: str
+    path: str
+    gloss: str
+    is_leaf: bool
+    children: list["TaxonomyNodeOut"]
+
+
+class TaxonomyRepository(ABC):
+    @abstractmethod
+    async def tree(self) -> list[TaxonomyNodeOut]: ...

@@ -16,6 +16,7 @@ from main.document_ingest import compute_content_hash
 from main.models import Document, Token, build_tokens
 from worker.celery_app import app
 from worker.tasks.aggregates import compute_document_ngrams, compute_document_word_freq
+from worker.tasks.error_annotations import extract_document_error_annotations
 
 # Bumped whenever main/corpus_parsing.py's tokenization logic changes in a
 # way that would produce different tokens for the same content — nothing
@@ -75,5 +76,12 @@ def index_document(document_id: int) -> int:
     # exist too.
     compute_document_word_freq.delay(document_id)
     compute_document_ngrams.delay(document_id)
+    # Error annotations are a separate concern from tokens/word-freq/ngrams
+    # (docs/error-analytics-plan.md) — status above is intentionally NOT
+    # gated on this completing; it has its own eventual-consistency window.
+    # compute_document_error_freq is chained from inside this task, not
+    # fired independently here, so it never races ahead of the annotations
+    # it reads.
+    extract_document_error_annotations.delay(document_id)
 
     return document_id
