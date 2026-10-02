@@ -17,7 +17,7 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Corpus, Document
+from .models import Corpus, Document, UserProfile
 from worker.tasks.indexing import index_document
 
 CORPUS_XML = """<document>
@@ -1611,3 +1611,263 @@ class RetokenizeDryRunTests(TestCase):
         self.assertIn('n.xml', output)
         self.assertIn('(+5)', output)  # 5 original tokens recomputed from a stale 0
         self.assertIn('Dry run only', output)
+
+
+class AccountApiTestCase(TestCase):
+    """Shared fixture for main/api_users.py (docs/user-management-plan.md):
+    a plain user, an Admin (is_staff), and a Super Admin (is_superuser) —
+    the three tiers the feature's RBAC distinguishes."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.plain = User.objects.create_user('plain', password='pw-for-tests-1', email='plain@example.com')
+        cls.admin = User.objects.create_user('admin', password='pw-for-tests-1', email='admin@example.com', is_staff=True)
+        cls.super_admin = User.objects.create_user(
+            'superadmin', password='pw-for-tests-1', email='superadmin@example.com',
+            is_staff=True, is_superuser=True,
+        )
+
+    def auth_headers(self, username):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        tokens = response.json()
+        return {'HTTP_AUTHORIZATION': f"Bearer {tokens['access']}"}, tokens.get('refresh')
+
+
+class UserAccountApiTests(AccountApiTestCase):
+    """Admin (and, via the confirmed superset, Super Admin) manages regular
+    Users — /api/users/."""
+
+    def test_anonymous_cannot_list_users(self):
+        response = self.client.get(reverse('api_user_list'))
+        self.assertEqual(response.status_code, 401)
+
+    def test_non_staff_cannot_list_users(self):
+        headers, _ = self.auth_headers('plain')
+        response = self.client.get(reverse('api_user_list'), **headers)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_list_and_create_users(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.post(
+            reverse('api_user_list'),
+            data=json.dumps({'username': 'newbie', 'email': 'newbie@example.com', 'password': 'a-strong-pw-1'}),
+            content_type='application/json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertFalse(body['is_staff'])
+        self.assertEqual(body['status'], 'active')
+
+        response = self.client.get(reverse('api_user_list'), **headers)
+        self.assertEqual(response.status_code, 200)
+        usernames = {row['username'] for row in response.json()['results']}
+        self.assertIn('newbie', usernames)
+
+    def test_super_admin_can_also_manage_users(self):
+        # Proves the confirmed superset: Super Admin's is_staff=True already
+        # satisfies ADMIN_PERMISSIONS, no separate code path needed.
+        headers, _ = self.auth_headers('superadmin')
+        response = self.client.post(
+            reverse('api_user_list'),
+            data=json.dumps({'username': 'fromsuper', 'email': 'fromsuper@example.com', 'password': 'a-strong-pw-1'}),
+            content_type='application/json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, 201)
+
+    def test_create_rejects_duplicate_email_case_insensitively(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.post(
+            reverse('api_user_list'),
+            data=json.dumps({'username': 'other', 'email': 'PLAIN@example.com', 'password': 'a-strong-pw-1'}),
+            content_type='application/json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('email', response.json())
+
+    def test_create_cannot_self_elevate_is_staff(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.post(
+            reverse('api_user_list'),
+            data=json.dumps({
+                'username': 'sneaky', 'email': 'sneaky@example.com', 'password': 'a-strong-pw-1',
+                'is_staff': True, 'is_superuser': True,
+            }),
+            content_type='application/json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        created = User.objects.get(username='sneaky')
+        self.assertFalse(created.is_staff)
+        self.assertFalse(created.is_superuser)
+
+    def test_users_list_excludes_admins_and_superadmins(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.get(reverse('api_user_list'), **headers)
+        usernames = {row['username'] for row in response.json()['results']}
+        self.assertNotIn('admin', usernames)
+        self.assertNotIn('superadmin', usernames)
+
+    def test_admin_gets_404_targeting_an_admin_via_users_endpoint(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.get(reverse('api_user_detail', args=[self.super_admin.id]), **headers)
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_can_block_and_unblock_user(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.post(reverse('api_user_block', args=[self.plain.id]), **headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['status'], 'blocked')
+        # Checked directly on the response body, not just the DB afterward
+        # — the view's `target` was select_related("profile") before this
+        # block created/updated that row, so a stale cache would silently
+        # serialize None here even though the DB write succeeded.
+        self.assertIsNotNone(body['blocked_at'])
+        self.assertEqual(body['blocked_by'], 'admin')
+
+        self.plain.refresh_from_db()
+        self.assertFalse(self.plain.is_active)
+        profile = UserProfile.objects.get(user=self.plain)
+        self.assertIsNotNone(profile.blocked_at)
+        self.assertEqual(profile.blocked_by, self.admin)
+
+        response = self.client.post(reverse('api_user_unblock', args=[self.plain.id]), **headers)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['status'], 'active')
+        self.assertIsNone(body['blocked_at'])
+        self.assertIsNone(body['blocked_by'])
+
+        self.plain.refresh_from_db()
+        self.assertTrue(self.plain.is_active)
+        profile.refresh_from_db()
+        self.assertIsNone(profile.blocked_at)
+
+    def test_blocked_user_cannot_obtain_a_new_token(self):
+        admin_headers, _ = self.auth_headers('admin')
+        self.client.post(reverse('api_user_block', args=[self.plain.id]), **admin_headers)
+
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': 'plain', 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_blocking_blacklists_outstanding_refresh_token(self):
+        _, refresh = self.auth_headers('plain')
+        admin_headers, _ = self.auth_headers('admin')
+
+        self.client.post(reverse('api_user_block', args=[self.plain.id]), **admin_headers)
+
+        response = self.client.post(
+            reverse('token_refresh'),
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_self_action_guard_rejects_targeting_own_account(self):
+        # Unit-tested directly: the Admins-tier queryset already excludes
+        # every super-admin, including the acting user's own row if they
+        # were one, and an Admin's own row is never in the Users tier
+        # either — so this guard is unreachable end-to-end through either
+        # HTTP endpoint today. Kept as defense-in-depth regardless
+        # (docs/user-management-plan.md); tested directly instead of
+        # pretending an unreachable HTTP scenario exists.
+        from rest_framework.exceptions import PermissionDenied
+        from rest_framework.test import APIRequestFactory
+
+        from .permissions import assert_not_targeting_self
+
+        request = APIRequestFactory().get('/')
+        request.user = self.admin
+        with self.assertRaises(PermissionDenied):
+            assert_not_targeting_self(request, self.admin)
+
+    def test_soft_delete_anonymizes_but_keeps_the_row_and_documents(self):
+        doc = Document.objects.create(title='mine.txt', content='saya suka teh', user=self.plain)
+        headers, _ = self.auth_headers('admin')
+
+        response = self.client.delete(reverse('api_user_detail', args=[self.plain.id]), **headers)
+        self.assertEqual(response.status_code, 204)
+
+        self.assertTrue(User.objects.filter(pk=self.plain.id).exists())
+        self.plain.refresh_from_db()
+        self.assertFalse(self.plain.is_active)
+        self.assertEqual(self.plain.username, f'deleted-user-{self.plain.id}')
+        self.assertFalse(self.plain.has_usable_password())
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.user_id, self.plain.id)  # Document survives, FK intact
+
+        profile = UserProfile.objects.get(user=self.plain)
+        self.assertIsNotNone(profile.deleted_at)
+        self.assertEqual(profile.deleted_by, self.admin)
+
+    def test_deleted_user_404s_on_every_endpoint_afterward(self):
+        headers, _ = self.auth_headers('admin')
+        self.client.delete(reverse('api_user_detail', args=[self.plain.id]), **headers)
+
+        response = self.client.get(reverse('api_user_detail', args=[self.plain.id]), **headers)
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.post(reverse('api_user_block', args=[self.plain.id]), **headers)
+        self.assertEqual(response.status_code, 404)
+
+
+class AdminAccountApiTests(AccountApiTestCase):
+    """Super Admin manages Admins — /api/admins/. Admin itself is NOT a
+    superset here (the inverse of the Users-tier superset)."""
+
+    def test_anonymous_cannot_list_admins(self):
+        response = self.client.get(reverse('api_admin_list'))
+        self.assertEqual(response.status_code, 401)
+
+    def test_admin_cannot_list_admins(self):
+        headers, _ = self.auth_headers('admin')
+        response = self.client.get(reverse('api_admin_list'), **headers)
+        self.assertEqual(response.status_code, 403)
+
+    def test_super_admin_can_list_and_create_admins(self):
+        headers, _ = self.auth_headers('superadmin')
+        response = self.client.post(
+            reverse('api_admin_list'),
+            data=json.dumps({'username': 'newadmin', 'email': 'newadmin@example.com', 'password': 'a-strong-pw-1'}),
+            content_type='application/json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertTrue(body['is_staff'])
+        self.assertFalse(body['is_superuser'])
+
+        response = self.client.get(reverse('api_admin_list'), **headers)
+        self.assertEqual(response.status_code, 200)
+        usernames = {row['username'] for row in response.json()['results']}
+        self.assertIn('newadmin', usernames)
+
+    def test_admins_list_excludes_superadmins(self):
+        headers, _ = self.auth_headers('superadmin')
+        response = self.client.get(reverse('api_admin_list'), **headers)
+        usernames = {row['username'] for row in response.json()['results']}
+        self.assertNotIn('superadmin', usernames)
+
+    def test_super_admin_gets_404_targeting_a_superadmin_via_admins_endpoint(self):
+        headers, _ = self.auth_headers('superadmin')
+        response = self.client.get(reverse('api_admin_detail', args=[self.super_admin.id]), **headers)
+        self.assertEqual(response.status_code, 404)
+
+    def test_super_admin_can_block_an_admin(self):
+        headers, _ = self.auth_headers('superadmin')
+        response = self.client.post(reverse('api_admin_block', args=[self.admin.id]), **headers)
+        self.assertEqual(response.status_code, 200)
+        self.admin.refresh_from_db()
+        self.assertFalse(self.admin.is_active)

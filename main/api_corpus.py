@@ -26,15 +26,14 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers, status
 from rest_framework.generics import ListAPIView
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .document_ingest import decode_uploaded_file, get_or_create_document
 from .models import Corpus, Document
+from .permissions import ADMIN_PERMISSIONS
 from worker.tasks.indexing import index_document
-
-ADMIN_PERMISSIONS = [IsAuthenticated, IsAdminUser]
 
 
 def _annotated_corpus_queryset():

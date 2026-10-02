@@ -28,6 +28,11 @@ class KUISTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['is_staff'] = user.is_staff
         token['username'] = user.username
         token['email'] = user.email
+        # Cosmetic-only, for KUIS-FE to distinguish Admin vs. Super Admin in
+        # the UI (docs/user-management-plan.md) — unlike is_staff, dataplane/
+        # never reads this; real enforcement of the Super Admin tier is
+        # main/permissions.py::IsSuperAdminUser, re-checked server-side.
+        token['is_superuser'] = user.is_superuser
 
         return token
 

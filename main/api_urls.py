@@ -13,6 +13,16 @@ from .api_account import ContactView, ProfileView, RegisterView
 from .api_auth import KUISTokenObtainPairView
 from .api_corpus import CorpusAssignView, CorpusDetailView, CorpusListView
 from .api_documents import DocumentListView, DocumentUploadView
+from .api_users import (
+    AdminBlockView,
+    AdminDetailView,
+    AdminListView,
+    AdminUnblockView,
+    UserBlockView,
+    UserDetailView,
+    UserListView,
+    UserUnblockView,
+)
 
 urlpatterns = [
     path("auth/token/", KUISTokenObtainPairView.as_view(), name="token_obtain_pair"),
@@ -26,4 +36,12 @@ urlpatterns = [
     path("corpora/<int:pk>/", CorpusDetailView.as_view(), name="api_corpus_detail"),
     path("documents/", DocumentListView.as_view(), name="api_document_list"),
     path("documents/upload/", DocumentUploadView.as_view(), name="api_document_upload"),
+    path("users/", UserListView.as_view(), name="api_user_list"),
+    path("users/<int:pk>/", UserDetailView.as_view(), name="api_user_detail"),
+    path("users/<int:pk>/block/", UserBlockView.as_view(), name="api_user_block"),
+    path("users/<int:pk>/unblock/", UserUnblockView.as_view(), name="api_user_unblock"),
+    path("admins/", AdminListView.as_view(), name="api_admin_list"),
+    path("admins/<int:pk>/", AdminDetailView.as_view(), name="api_admin_detail"),
+    path("admins/<int:pk>/block/", AdminBlockView.as_view(), name="api_admin_block"),
+    path("admins/<int:pk>/unblock/", AdminUnblockView.as_view(), name="api_admin_unblock"),
 ]

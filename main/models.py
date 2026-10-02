@@ -257,6 +257,32 @@ class DocumentErrorFreq(models.Model):
         ]
 
 
+class UserProfile(models.Model):
+    """Sidecar for the four extra fields user management needs on top of
+    django.contrib.auth.models.User (docs/user-management-plan.md) — a
+    OneToOneField instead of a custom AUTH_USER_MODEL, since swapping that
+    this late would touch every existing FK to auth.User (Document.user,
+    Corpus.created_by, token_blacklist) for a net gain of four columns.
+
+    Rows are created lazily (get_or_create) the first time an account is
+    blocked/deleted, plus eagerly whenever main/api_users.py creates a new
+    account — never via a one-time backfill migration, since accounts
+    created afterward (Django admin, shell) would still need the lazy path
+    regardless, making a backfill redundant. A profile-less account (every
+    account that predates this feature and has never been touched by it)
+    simply reads as "active, never blocked".
+    """
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    blocked_at = models.DateTimeField(null=True, blank=True)
+    blocked_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+
+    def __str__(self):
+        return f"profile({self.user.username})"
+
+
 def build_tokens(document):
     """(Re)computes the Token rows for a document from its content, for both the
     original and corrected word streams. Does not save the document itself.
