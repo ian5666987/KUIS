@@ -14,14 +14,45 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .document_ingest import decode_uploaded_file, get_or_create_document
-from .models import Document
+from .models import Document, DocumentMetadata
 from worker.tasks.indexing import index_document
 
 ADMIN_PERMISSIONS = [IsAuthenticated, IsAdminUser]
 
 
+class DocumentMetadataSerializer(serializers.ModelSerializer):
+    """Read-only view of a document's catalogue entry
+    (docs/metadata-catalogue-plan.md). Writes go through
+    `load_metadata_catalogue`, never the API — the CSV is the authority, so an
+    editable field here would create a second, divergent one.
+
+    Exposed so the document list can answer the operational question the
+    importer's summary only answers in aggregate: which individual files have
+    no metadata, and why a metadata filter excludes them.
+    """
+
+    class Meta:
+        model = DocumentMetadata
+        fields = [
+            "source_filename",
+            "university",
+            "year",
+            "grade",
+            "topic",
+            "topic_en",
+            "word_count",
+            "name_code",
+        ]
+        read_only_fields = fields
+
+
 class DocumentSerializer(serializers.ModelSerializer):
     corpus_count = serializers.IntegerField()
+    # None for a document the catalogue doesn't cover — which is a normal,
+    # supported state, not an error (see the plan: uploads are accepted with or
+    # without metadata). Reads via the reverse one-to-one, so the queryset
+    # select_related's it to keep the list one query.
+    metadata = DocumentMetadataSerializer(source="catalogue_entry", read_only=True)
 
     class Meta:
         model = Document
@@ -33,6 +64,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "token_count_corrected",
             "status",
             "corpus_count",
+            "metadata",
         ]
 
 
@@ -42,18 +74,33 @@ class DocumentListView(ListAPIView):
     corpus_dashboard (only the write actions built on it were staff-only),
     so listing stays IsAuthenticated, matching that precedent.
     ?unassigned=true mirrors corpus_dashboard's `unassigned` context
-    variable, used by the assign-modal's document picker."""
+    variable, used by the assign-modal's document picker.
+    ?has_metadata=false/true narrows to documents the metadata catalogue
+    doesn't/does cover (docs/metadata-catalogue-plan.md)."""
 
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = Document.objects.annotate(
-            corpus_count=Count("corpora", distinct=True)
-        ).order_by("-uploaded_at")
+        queryset = (
+            Document.objects.annotate(corpus_count=Count("corpora", distinct=True))
+            # One query for the whole page's catalogue entries rather than one
+            # per row — the serializer reads the reverse one-to-one.
+            .select_related("catalogue_entry")
+            .order_by("-uploaded_at")
+        )
 
         if self.request.query_params.get("unassigned") == "true":
             queryset = queryset.filter(corpora__isnull=True)
+
+        # Mirrors ?unassigned=true: lets an admin find exactly the files the
+        # catalogue doesn't cover, which is otherwise only visible as a count
+        # in the import command's summary.
+        has_metadata = self.request.query_params.get("has_metadata")
+        if has_metadata == "false":
+            queryset = queryset.filter(catalogue_entry__isnull=True)
+        elif has_metadata == "true":
+            queryset = queryset.filter(catalogue_entry__isnull=False)
 
         return queryset
 
@@ -99,7 +146,13 @@ class DocumentUploadView(APIView):
             index_document.delay(doc.id)  # async — see architecture plan §5
 
         output = DocumentSerializer(
-            Document.objects.annotate(corpus_count=Count("corpora", distinct=True)).get(id=doc.id)
+            Document.objects.annotate(corpus_count=Count("corpora", distinct=True))
+            # The response carries the catalogue entry get_or_create_document
+            # just linked (or null when the catalogue doesn't cover this file),
+            # so the uploader can see immediately whether it will be reachable
+            # by a metadata filter.
+            .select_related("catalogue_entry")
+            .get(id=doc.id)
         ).data
         output["duplicate"] = not created
         return Response(output, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)

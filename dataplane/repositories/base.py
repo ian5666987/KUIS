@@ -232,9 +232,25 @@ class ErrorCategoryCount:
 
 
 @dataclass(frozen=True)
+class ErrorNodeCount:
+    """One taxonomy node's share of the summary, at any depth below the
+    literal root — the per-node breakdown the frontend's expandable
+    summary tree traverses. `count` is already subtree-inclusive, so a
+    client never has to sum its descendants; `self_count` is the subset
+    resolved directly to this node, which is nonzero only for an
+    annotation whose features stopped short of a leaf."""
+
+    code: str  # unique across the whole taxonomy (e.g. "gramatikal", "nomafx")
+    path: str  # semicolon-joined, root-first ("eror;gramatikal;frasa-nomina;nomafx")
+    count: int  # this node plus every descendant
+    self_count: int  # resolved to this exact node
+
+
+@dataclass(frozen=True)
 class ErrorSummary:
     total: int
     by_category: list[ErrorCategoryCount]
+    by_node: list[ErrorNodeCount]
 
 
 class ErrorAnalyticsRepository(ABC):
@@ -283,3 +299,64 @@ class TaxonomyNodeOut:
 class TaxonomyRepository(ABC):
     @abstractmethod
     async def tree(self) -> list[TaxonomyNodeOut]: ...
+
+
+# --- Document metadata -----------------------------------------------------
+# The secondary filter axis (docs/metadata-catalogue-plan.md): catalogue
+# fields imported from metadata/*.csv and attached to a Document. Unlike
+# ErrorFilter this is NOT per-feature — it narrows the document set every
+# feature runs over, so it is applied once in
+# dataplane/repositories/shared.py::resolve_document_ids rather than reaching
+# any repository method's signature.
+
+# The sentinel meaning "documents with no value for this facet" — which covers
+# BOTH a catalogue row whose field is empty and a document with no row at all.
+# DUPLICATED from main/metadata_catalogue.py::UNSET: the dataplane can't
+# import Django code, and api_corpus.py sets the precedent for duplicating a
+# small shared value over reaching across surfaces. Keep the two in step.
+METADATA_UNSET = "__none__"
+
+
+@dataclass(frozen=True)
+class MetadataFilter:
+    """A parsed secondary metadata filter.
+
+    Values and "unset" are separate because they compose with OR *within* a
+    facet — "university is TUFS or has no value" is one checkbox list. Facets
+    are then AND-ed with each other.
+
+    `unset` is a frozenset of facet names rather than a sentinel left inside
+    each value list, so the SQL builder never has to re-inspect strings.
+    """
+
+    universities: tuple[str, ...] = ()
+    years: tuple[int, ...] = ()
+    grades: tuple[int, ...] = ()
+    unset: frozenset[str] = frozenset()
+    name_code: str = ""
+
+    @property
+    def is_empty(self) -> bool:
+        return not (
+            self.universities or self.years or self.grades or self.unset or self.name_code
+        )
+
+
+@dataclass(frozen=True)
+class MetadataFacets:
+    """Distinct values available per facet, for populating the filter UI.
+
+    Drawn only from catalogue rows that have a linked document, so a ticked
+    box can never produce a guaranteed-empty result. Global rather than scoped
+    to a corpus selection, matching TaxonomyRepository.tree() — a scoped list
+    would reshuffle the controls every time a corpus is ticked.
+    """
+
+    universities: list[str]
+    years: list[int]
+    grades: list[int]
+
+
+class MetadataRepository(ABC):
+    @abstractmethod
+    async def facets(self) -> MetadataFacets: ...

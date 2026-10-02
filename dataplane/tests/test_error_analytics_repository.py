@@ -126,3 +126,47 @@ class TestSummary:
         by_category = {c.category: c.count for c in summary.by_category}
         assert by_category == {"ejaan": 2, "gramatikal": 1}
         assert summary.total == 3
+
+    async def test_by_node_rolls_descendant_counts_up_to_every_ancestor(self, seeded_corpus, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        summary = await repo.summary([seeded_corpus["error_doc_id"]])
+
+        counts = {n.code: n.count for n in summary.by_node}
+        # ejk x2 at eror;ejaan;ejk and urtfn x1 at
+        # eror;gramatikal;frasa-nomina;urtfn — every intermediate node on
+        # both paths carries its subtree's total, at any depth.
+        assert counts == {"ejaan": 2, "ejk": 2, "gramatikal": 1, "frasa-nomina": 1, "urtfn": 1}
+
+    async def test_by_node_separates_subtree_count_from_self_count(self, seeded_corpus, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        summary = await repo.summary([seeded_corpus["error_doc_id"]])
+
+        self_counts = {n.code: n.self_count for n in summary.by_node}
+        # Only the leaves the annotations actually resolved to count as
+        # "self" — an ancestor's own tally stays 0 while its subtree is 2.
+        assert self_counts == {"ejaan": 0, "ejk": 2, "gramatikal": 0, "frasa-nomina": 0, "urtfn": 1}
+
+    async def test_by_node_excludes_the_literal_root_and_carries_full_paths(self, seeded_corpus, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        summary = await repo.summary([seeded_corpus["error_doc_id"]])
+
+        assert "eror" not in {n.code for n in summary.by_node}
+        paths = {n.code: n.path for n in summary.by_node}
+        assert paths["gramatikal"] == "eror;gramatikal"
+        assert paths["urtfn"] == "eror;gramatikal;frasa-nomina;urtfn"
+
+    async def test_by_node_top_level_agrees_with_by_category_and_total(self, seeded_corpus, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        summary = await repo.summary([seeded_corpus["error_doc_id"]])
+
+        top_level = {n.code: n.count for n in summary.by_node if n.path.count(";") == 1}
+        assert top_level == {c.category: c.count for c in summary.by_category}
+        assert sum(top_level.values()) == summary.total
+
+    async def test_summary_of_no_documents_is_empty(self, session):
+        repo = PostgresErrorAnalyticsRepository(session)
+        summary = await repo.summary([])
+
+        assert summary.total == 0
+        assert summary.by_category == []
+        assert summary.by_node == []

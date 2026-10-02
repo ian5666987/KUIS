@@ -1871,3 +1871,601 @@ class AdminAccountApiTests(AccountApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.admin.refresh_from_db()
         self.assertFalse(self.admin.is_active)
+
+
+# --- Document metadata catalogue (docs/metadata-catalogue-plan.md) ---------
+
+METADATA_CSV_HEADER = 'File name,University,Year,Grade,Topic,Topic (translated into English),Number of words,Name code'
+
+# CRLF line endings and NO trailing newline, matching the real catalogue files
+# exactly — a reader that doesn't handle those leaves a stray '\r' on every
+# Name code, which is the single most likely way this importer breaks on real
+# data while passing a hand-written LF fixture.
+METADATA_CSV = '\r\n'.join([
+    METADATA_CSV_HEADER,
+    'TUFS2023KOMSHI314.txt,TUFS,2023,3,wawancara,interview,650,KOMSHI',
+    'OU2023BETA202.txt,OU,2023,2,tempat wisata,tourist attraction,405,BETA',
+    'OU2023BETA202.txt,OU,2023,2,argumentasi,argumentation,374,BETA',
+])
+
+HEADER_XML = """<document>
+  <header><textfile>KUIS/TUFS2023KOMSHI314.txt</textfile><lang>indonesian</lang></header>
+  <body>saya suka nasi goreng</body>
+</document>"""
+
+
+def _write_csv(tmpdir, name, text):
+    path = tmpdir / name
+    # newline='' so the \r\n in the fixture reaches the file verbatim rather
+    # than being translated by Python's universal-newline writer.
+    with open(path, 'w', newline='', encoding='utf-8') as handle:
+        handle.write(text)
+    return path
+
+
+class MetadataMatchingTests(TestCase):
+    """main/metadata_catalogue.py's match-key formula and upload-time linking."""
+
+    def test_header_textfile_wins_over_the_uploaded_filename(self):
+        from .metadata_catalogue import extract_textfile_name, match_key_for_document
+
+        self.assertEqual(extract_textfile_name(HEADER_XML), 'TUFS2023KOMSHI314.txt')
+
+        # Uploaded under a name that shares nothing with the catalogue's: the
+        # header is what reconciles them.
+        doc = Document.objects.create(title='whatever-the-user-called-it.xml', content=HEADER_XML)
+        self.assertEqual(match_key_for_document(doc), 'tufs2023komshi314')
+
+    def test_real_sample_with_an_eror_suffix_matches_the_catalogue_name(self):
+        """The case the whole header-first decision exists for: the file on
+        disk is KUIS2023FUA201-Eror.xml, the catalogue says
+        KUIS2023FUA201.txt, and no suffix heuristic is involved."""
+        from django.conf import settings
+
+        from .metadata_catalogue import match_key_for_document
+
+        content = (settings.BASE_DIR / 'info' / 'KUIS2023FUA201-Eror.xml').read_text(encoding='utf-8')
+        doc = Document.objects.create(title='KUIS2023FUA201-Eror.xml', content=content)
+
+        self.assertEqual(match_key_for_document(doc), 'kuis2023fua201')
+
+    def test_falls_back_to_the_title_when_there_is_no_header(self):
+        from .metadata_catalogue import extract_textfile_name, match_key_for_document
+
+        doc = Document.objects.create(title='PLAIN2023.TXT', content='just some words')
+        self.assertIsNone(extract_textfile_name('just some words'))
+        self.assertEqual(match_key_for_document(doc), 'plain2023')
+
+    def test_unparseable_xml_falls_back_rather_than_raising(self):
+        from .metadata_catalogue import extract_textfile_name, match_key_for_document
+
+        broken = '<document><header><textfile>x.txt</textfile>'
+        self.assertIsNone(extract_textfile_name(broken))
+        doc = Document.objects.create(title='fallback.xml', content=broken)
+        self.assertEqual(match_key_for_document(doc), 'fallback')
+
+    def test_match_key_strips_one_extension_and_the_directory(self):
+        from .metadata_catalogue import normalize_match_key
+
+        self.assertEqual(normalize_match_key('KUIS/A2023B.txt'), 'a2023b')
+        self.assertEqual(normalize_match_key('A2023B.xml'), 'a2023b')
+        self.assertEqual(normalize_match_key('  A2023B.TXT  '), 'a2023b')
+        self.assertEqual(normalize_match_key('no-extension'), 'no-extension')
+        self.assertEqual(normalize_match_key(''), '')
+        # NOT stripped — a suffix is a different filename, not a variant.
+        self.assertEqual(normalize_match_key('A2023B-Eror.xml'), 'a2023b-eror')
+
+    def test_upload_links_the_document_to_an_already_loaded_entry(self):
+        from .document_ingest import get_or_create_document
+        from .models import DocumentMetadata
+
+        DocumentMetadata.objects.create(
+            source_filename='TUFS2023KOMSHI314.txt', match_key='tufs2023komshi314',
+            university='TUFS', year=2023, grade=3, source_file='t.csv',
+        )
+
+        doc, created = get_or_create_document(title='anything.xml', content=HEADER_XML, user=None)
+
+        self.assertTrue(created)
+        self.assertEqual(doc.catalogue_entry.university, 'TUFS')
+
+    def test_upload_without_a_catalogue_entry_still_succeeds(self):
+        """A document the catalogue doesn't cover is a normal, supported state."""
+        from .document_ingest import get_or_create_document
+        from .models import DocumentMetadata
+
+        doc, created = get_or_create_document(title='unknown.xml', content=HEADER_XML, user=None)
+
+        self.assertTrue(created)
+        self.assertEqual(DocumentMetadata.objects.count(), 0)
+        self.assertFalse(hasattr(doc, 'catalogue_entry') and doc.catalogue_entry)
+
+    def test_a_dedup_hit_does_not_relink_or_steal_the_entry(self):
+        from .document_ingest import get_or_create_document
+        from .models import DocumentMetadata
+
+        DocumentMetadata.objects.create(
+            source_filename='TUFS2023KOMSHI314.txt', match_key='tufs2023komshi314',
+            source_file='t.csv',
+        )
+
+        first, created_first = get_or_create_document(title='a.xml', content=HEADER_XML, user=None)
+        second, created_second = get_or_create_document(title='b.xml', content=HEADER_XML, user=None)
+
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(DocumentMetadata.objects.get().document_id, first.id)
+
+    def test_an_entry_already_claimed_is_not_moved_to_another_document(self):
+        from .metadata_catalogue import link_catalogue_entry
+        from .models import DocumentMetadata
+
+        entry = DocumentMetadata.objects.create(
+            source_filename='TUFS2023KOMSHI314.txt', match_key='tufs2023komshi314',
+            source_file='t.csv',
+        )
+        first = Document.objects.create(title='first.xml', content=HEADER_XML, content_hash='h1')
+        link_catalogue_entry(first)
+
+        # Same header, different content (so no dedup) — the second document
+        # must NOT steal the entry and orphan the first.
+        second = Document.objects.create(
+            title='second.xml', content=HEADER_XML.replace('nasi goreng', 'nasi'), content_hash='h2',
+        )
+        self.assertIsNone(link_catalogue_entry(second))
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.document_id, first.id)
+
+
+class LoadMetadataCatalogueCommandTests(TestCase):
+    """main/management/commands/load_metadata_catalogue.py."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.csv_path = _write_csv(self.tmpdir, 'metadata_2023.csv', METADATA_CSV)
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command('load_metadata_catalogue', '--file', str(self.csv_path), *args, stdout=out)
+        return out.getvalue()
+
+    def test_imports_rows_and_strips_the_crlf_from_the_last_column(self):
+        from .models import DocumentMetadata
+
+        self._run()
+
+        entry = DocumentMetadata.objects.get(match_key='tufs2023komshi314')
+        self.assertEqual(entry.source_filename, 'TUFS2023KOMSHI314.txt')
+        self.assertEqual(entry.university, 'TUFS')
+        self.assertEqual(entry.year, 2023)
+        self.assertEqual(entry.grade, 3)
+        self.assertEqual(entry.topic, 'wawancara')
+        self.assertEqual(entry.topic_en, 'interview')
+        self.assertEqual(entry.word_count, 650)
+        # The real failure mode: 'KOMSHI\r' instead of 'KOMSHI'.
+        self.assertEqual(entry.name_code, 'KOMSHI')
+        self.assertEqual(entry.source_file, 'metadata_2023.csv')
+
+    def test_conflicting_duplicate_is_last_row_wins_and_is_reported(self):
+        from .models import DocumentMetadata
+
+        output = self._run()
+
+        entry = DocumentMetadata.objects.get(match_key='ou2023beta202')
+        self.assertEqual(entry.topic, 'argumentasi')   # the later row
+        self.assertEqual(entry.word_count, 374)
+
+        # Silently picking a winner by file order is exactly what has to be
+        # visible, so the filename and both line numbers must be named.
+        self.assertIn('OU2023BETA202.txt', output)
+        self.assertIn('DIFFERING', output)
+        self.assertIn('3', output)  # the later line number
+
+    def test_three_rows_collapse_to_two_entries(self):
+        from .models import DocumentMetadata
+
+        self._run()
+        self.assertEqual(DocumentMetadata.objects.count(), 2)
+
+    def test_idempotent_rerun_updates_rather_than_duplicating(self):
+        from .models import DocumentMetadata
+
+        self._run()
+        first = DocumentMetadata.objects.count()
+        output = self._run()
+
+        self.assertEqual(DocumentMetadata.objects.count(), first)
+        self.assertIn('0 created', output)
+
+    def test_rerun_keeps_an_already_resolved_document_link(self):
+        """The reason this command upserts instead of delete-and-recreate."""
+        from .models import DocumentMetadata
+
+        self._run()
+        doc = Document.objects.create(title='anything.xml', content=HEADER_XML, content_hash='h')
+        call_command('load_metadata_catalogue', '--relink', stdout=StringIO())
+        self.assertEqual(DocumentMetadata.objects.get(match_key='tufs2023komshi314').document_id, doc.id)
+
+        self._run()
+
+        self.assertEqual(DocumentMetadata.objects.get(match_key='tufs2023komshi314').document_id, doc.id)
+
+    def test_dry_run_writes_nothing(self):
+        from .models import DocumentMetadata
+
+        output = self._run('--dry-run')
+
+        self.assertEqual(DocumentMetadata.objects.count(), 0)
+        self.assertIn('Dry run', output)
+
+    def test_import_links_a_document_uploaded_beforehand(self):
+        """The catalogue -> document direction: the file was already there."""
+        from .models import DocumentMetadata
+
+        doc = Document.objects.create(title='anything.xml', content=HEADER_XML, content_hash='h')
+
+        output = self._run()
+
+        self.assertEqual(DocumentMetadata.objects.get(match_key='tufs2023komshi314').document_id, doc.id)
+        self.assertIn('1 linked', output)
+
+    def test_relink_resolves_documents_uploaded_after_the_import(self):
+        from .models import DocumentMetadata
+
+        self._run()
+        self.assertIsNone(DocumentMetadata.objects.get(match_key='tufs2023komshi314').document_id)
+
+        # Created directly, bypassing the upload path's own linking, so this
+        # exercises --relink rather than get_or_create_document.
+        doc = Document.objects.create(title='anything.xml', content=HEADER_XML, content_hash='h')
+
+        out = StringIO()
+        call_command('load_metadata_catalogue', '--relink', stdout=out)
+
+        self.assertEqual(DocumentMetadata.objects.get(match_key='tufs2023komshi314').document_id, doc.id)
+        self.assertIn('Relinked', out.getvalue())
+
+    def test_non_numeric_year_is_dropped_to_null_rather_than_failing_the_row(self):
+        from .models import DocumentMetadata
+
+        path = _write_csv(self.tmpdir, 'bad.csv', '\r\n'.join([
+            METADATA_CSV_HEADER,
+            'X2023A.txt,TUFS,n/a,3,topik,topic,100,AAA',
+        ]))
+        out = StringIO()
+        call_command('load_metadata_catalogue', '--file', str(path), stdout=out)
+
+        entry = DocumentMetadata.objects.get(match_key='x2023a')
+        self.assertIsNone(entry.year)
+        self.assertEqual(entry.university, 'TUFS')   # the rest of the row survives
+        self.assertIn('non-numeric year', out.getvalue())
+
+    def test_missing_required_column_is_a_command_error(self):
+        from django.core.management.base import CommandError
+
+        path = _write_csv(self.tmpdir, 'nofilename.csv', 'University,Year\r\nTUFS,2023')
+        with self.assertRaises(CommandError):
+            call_command('load_metadata_catalogue', '--file', str(path), stdout=StringIO())
+
+    def test_header_is_matched_case_and_whitespace_insensitively(self):
+        from .models import DocumentMetadata
+
+        path = _write_csv(self.tmpdir, 'messy.csv', '\r\n'.join([
+            ' FILE NAME ,university,YEAR,Grade,Topic,Topic (Translated Into English),number of words,NAME CODE',
+            'X2023A.txt,TUFS,2023,3,topik,topic,100,AAA',
+        ]))
+        call_command('load_metadata_catalogue', '--file', str(path), stdout=StringIO())
+
+        entry = DocumentMetadata.objects.get(match_key='x2023a')
+        self.assertEqual(entry.university, 'TUFS')
+        self.assertEqual(entry.topic_en, 'topic')
+        self.assertEqual(entry.name_code, 'AAA')
+
+    def test_utf8_bom_is_tolerated(self):
+        """Re-exporting the catalogue from Excel routinely adds one."""
+        from .models import DocumentMetadata
+
+        path = _write_csv(self.tmpdir, 'bom.csv', '﻿' + '\r\n'.join([
+            METADATA_CSV_HEADER,
+            'X2023A.txt,TUFS,2023,3,topik,topic,100,AAA',
+        ]))
+        call_command('load_metadata_catalogue', '--file', str(path), stdout=StringIO())
+
+        self.assertEqual(DocumentMetadata.objects.get(match_key='x2023a').university, 'TUFS')
+
+    def test_missing_file_is_a_command_error(self):
+        from django.core.management.base import CommandError
+
+        with self.assertRaises(CommandError):
+            call_command('load_metadata_catalogue', '--file', 'nope.csv', stdout=StringIO())
+
+    def test_relink_on_an_empty_catalogue_says_so_instead_of_failing(self):
+        out = StringIO()
+        call_command('load_metadata_catalogue', '--relink', stdout=out)
+        self.assertIn('catalogue is empty', out.getvalue())
+
+    def test_loads_the_real_repo_catalogue(self):
+        """Against metadata/*.csv as actually committed, not a fixture — the
+        two conflicting filenames in metadata_2023.csv are real data."""
+        from .models import DocumentMetadata
+
+        out = StringIO()
+        call_command('load_metadata_catalogue', stdout=out)
+        output = out.getvalue()
+
+        self.assertGreater(DocumentMetadata.objects.count(), 1500)
+        self.assertIn('OU2023BETA202.txt', output)
+        self.assertIn('OU2023OUSA202.txt', output)
+        # Nothing should have been skipped as unusable.
+        self.assertNotIn('unusable File name', output)
+
+
+class MetadataFilterViewTests(ExplorerTestCase):
+    """The secondary metadata filter on the Django analysis surface — applied
+    once in main/views.py::_get_selected_documents, so every analysis page and
+    every /export/ route inherits it (docs/metadata-catalogue-plan.md).
+
+    `annotated` is fully described, `plain` has an entry with every facet empty,
+    and a third document has no entry at all — the three states the "(no value)"
+    option has to reconcile.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        from .models import DocumentMetadata
+
+        cls.uncatalogued = Document.objects.create(
+            title='uncatalogued.txt', content=PLAIN_TEXT + ' extra', content_hash='uncat-hash',
+        )
+        index_document.delay(cls.uncatalogued.id)
+        cls.corpus.documents.add(cls.uncatalogued)
+
+        DocumentMetadata.objects.create(
+            source_filename='annotated.txt', match_key='annotated', document=cls.annotated,
+            university='TUFS', year=2023, grade=3, topic='wawancara', topic_en='interview',
+            word_count=650, name_code='KOMSHI', source_file='t.csv',
+        )
+        DocumentMetadata.objects.create(
+            source_filename='plain.txt', match_key='plain', document=cls.plain,
+            source_file='t.csv',
+        )
+        # Covers a file nobody uploaded — must never widen a result.
+        DocumentMetadata.objects.create(
+            source_filename='absent.txt', match_key='absent', document=None,
+            university='SFC', year=2024, grade=1, source_file='t.csv',
+        )
+
+    def titles(self, **params):
+        """Document titles in scope for a given filter, via the real view path."""
+        from .metadata_catalogue import metadata_filter_q, parse_facet_selection
+        from .models import Document
+
+        self.select(self.corpus)
+        request = self.client.get(reverse('word_frequency'), params).wsgi_request
+
+        selection = parse_facet_selection(request.GET)
+        return set(
+            Document.objects.filter(corpora__id__in=[self.corpus.id])
+            .filter(metadata_filter_q(selection))
+            .distinct()
+            .values_list('title', flat=True)
+        )
+
+    def test_no_filter_includes_every_document(self):
+        self.assertEqual(
+            self.titles(),
+            {'annotated.xml', 'plain.txt', 'uncatalogued.txt'},
+        )
+
+    def test_concrete_value_narrows_to_that_document(self):
+        self.assertEqual(self.titles(university='TUFS'), {'annotated.xml'})
+
+    def test_unset_selects_both_the_empty_field_and_the_absent_entry(self):
+        """The load-bearing case: plain.txt has an entry with no university,
+        uncatalogued.txt has no entry at all, and both read as "no value"."""
+        self.assertEqual(
+            self.titles(university='__none__'),
+            {'plain.txt', 'uncatalogued.txt'},
+        )
+
+    def test_value_or_unset_within_a_facet_is_a_union(self):
+        self.assertEqual(
+            self.titles(university=['TUFS', '__none__']),
+            {'annotated.xml', 'plain.txt', 'uncatalogued.txt'},
+        )
+
+    def test_facets_combine_with_and(self):
+        self.assertEqual(self.titles(university='TUFS', grade='3'), {'annotated.xml'})
+        self.assertEqual(self.titles(university='TUFS', grade='1'), set())
+
+    def test_numeric_facet_unset_works(self):
+        self.assertEqual(self.titles(grade='__none__'), {'plain.txt', 'uncatalogued.txt'})
+        self.assertEqual(self.titles(year='2023'), {'annotated.xml'})
+
+    def test_entry_without_a_document_never_widens_the_result(self):
+        self.assertEqual(self.titles(university='SFC'), set())
+        self.assertEqual(self.titles(year='2024'), set())
+
+    def test_name_code_matches_on_prefix(self):
+        self.assertEqual(self.titles(name_code='KOM'), {'annotated.xml'})
+        self.assertEqual(self.titles(name_code='kom'), {'annotated.xml'})
+        self.assertEqual(self.titles(name_code='OMSHI'), set())
+
+    def test_junk_on_a_numeric_facet_widens_rather_than_erroring(self):
+        self.assertEqual(
+            self.titles(grade='not-a-number'),
+            {'annotated.xml', 'plain.txt', 'uncatalogued.txt'},
+        )
+
+    def test_analysis_pages_apply_the_filter_and_still_render(self):
+        self.select(self.corpus)
+
+        for name in ['word_frequency', 'collocations', 'ngrams', 'dashboard', 'analysis_home']:
+            with self.subTest(view=name):
+                response = self.client.get(reverse(name), {'university': 'TUFS'})
+                self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(reverse('kwic'), {'q': 'saya', 'university': 'TUFS'})
+        self.assertEqual(response.status_code, 200)
+
+    def test_filtering_changes_the_reported_token_total(self):
+        self.select(self.corpus)
+
+        unfiltered = self.client.get(reverse('word_frequency')).context['selection_token_total']
+        filtered = self.client.get(
+            reverse('word_frequency'), {'university': 'TUFS'}
+        ).context['selection_token_total']
+
+        self.assertGreater(unfiltered, filtered)
+        self.assertGreater(filtered, 0)
+
+    def test_unset_and_value_partition_the_corpus_token_total(self):
+        self.select(self.corpus)
+
+        def total(**params):
+            return self.client.get(reverse('word_frequency'), params).context['selection_token_total']
+
+        self.assertEqual(
+            total(university='TUFS') + total(university='__none__'),
+            total(),
+        )
+
+    def test_exports_inherit_the_filter(self):
+        """The /export/ routes resolve documents through the same function, so
+        a filtered export must not silently dump the whole corpus."""
+        self.select(self.corpus)
+
+        unfiltered = self.client.get(reverse('word_frequency_export_csv'))
+        filtered = self.client.get(reverse('word_frequency_export_csv'), {'university': 'TUFS'})
+
+        self.assertEqual(filtered.status_code, 200)
+        self.assertLess(len(filtered.content), len(unfiltered.content))
+
+    def test_context_bar_renders_the_facet_controls(self):
+        self.select(self.corpus)
+        response = self.client.get(reverse('word_frequency'))
+        html = response.content.decode()
+
+        self.assertIn('Metadata filter', html)
+        self.assertIn('name="university"', html)
+        self.assertIn('value="TUFS"', html)
+        self.assertIn('(no value)', html)
+        # SFC exists only on an entry with no document, so it must not be offered.
+        self.assertNotIn('value="SFC"', html)
+
+    def test_facet_params_are_not_emitted_twice_inside_the_context_form(self):
+        """context_bar.html's `hidden_params exclude` must name every facet.
+        That form holds the real checkboxes, so a hidden input for the same
+        param there would submit every value twice.
+
+        Scoped to that one form on purpose: the results toolbar's own forms
+        (filter text, per-page) SHOULD carry the facets as hidden inputs —
+        that's what stops applying a text filter from wiping the metadata
+        filter. test_results_toolbar_carries_the_filter_forward covers that
+        side.
+        """
+        self.select(self.corpus)
+        html = self.client.get(
+            reverse('word_frequency'), {'university': 'TUFS'}
+        ).content.decode()
+
+        start = html.index('<form method="get" class="context"')
+        context_form = html[start:html.index('</form>', start)]
+
+        for facet in ['university', 'year', 'grade', 'name_code']:
+            with self.subTest(facet=facet):
+                self.assertNotIn(f'<input type="hidden" name="{facet}"', context_form)
+                # ...while the real control for it is present.
+                self.assertIn(f'name="{facet}"', context_form)
+
+    def test_results_toolbar_carries_the_filter_forward(self):
+        """Applying a text filter, changing page size, sorting or exporting must
+        all preserve the metadata filter — templatetags/kuis.py's hidden_params
+        and qs tags do this for any GET param, so it needs no per-facet code."""
+        self.select(self.corpus)
+        html = self.client.get(
+            reverse('word_frequency'), {'university': 'TUFS'}
+        ).content.decode()
+
+        self.assertIn('<input type="hidden" name="university" value="TUFS">', html)
+        self.assertIn('export/?university=TUFS', html)
+        self.assertIn('?university=TUFS&amp;sort=', html)
+
+    def test_filter_state_is_marked_active_in_the_context_bar(self):
+        self.select(self.corpus)
+
+        plain = self.client.get(reverse('word_frequency'))
+        self.assertFalse(plain.context['metadata_filter_active'])
+
+        filtered = self.client.get(reverse('word_frequency'), {'university': 'TUFS'})
+        self.assertTrue(filtered.context['metadata_filter_active'])
+        self.assertIn('filtered', filtered.content.decode())
+
+    def test_facet_values_come_only_from_linked_entries(self):
+        from .metadata_catalogue import facet_values
+
+        values = facet_values()
+        self.assertEqual(values['university'], ['TUFS'])
+        self.assertEqual(values['year'], [2023])
+        self.assertEqual(values['grade'], [3])
+
+
+class DocumentMetadataApiTests(ExplorerTestCase):
+    """GET /api/documents/ exposing each document's catalogue entry
+    (docs/metadata-catalogue-plan.md). Extends ExplorerTestCase for its users
+    and JWT helper, same as DocumentApiTests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        from .models import DocumentMetadata
+
+        cls.bare = Document.objects.create(
+            title='bare.xml', content=PLAIN_TEXT + ' more', content_hash='bare-hash',
+        )
+        DocumentMetadata.objects.create(
+            source_filename='annotated.txt', match_key='annotated', document=cls.annotated,
+            university='TUFS', year=2023, grade=3, topic='wawancara', topic_en='interview',
+            word_count=650, name_code='KOMSHI', source_file='t.csv',
+        )
+
+    def auth_headers(self, username='researcher'):
+        response = self.client.post(
+            reverse('token_obtain_pair'),
+            data=json.dumps({'username': username, 'password': 'pw-for-tests-1'}),
+            content_type='application/json',
+        )
+        return {'HTTP_AUTHORIZATION': f"Bearer {response.json()['access']}"}
+
+    def _by_title(self, **params):
+        response = self.client.get(reverse('api_document_list'), params, **self.auth_headers())
+        self.assertEqual(response.status_code, 200)
+        return {row['title']: row for row in response.json()}
+
+    def test_metadata_is_nested_on_each_document(self):
+        rows = self._by_title()
+
+        self.assertEqual(rows['annotated.xml']['metadata']['university'], 'TUFS')
+        self.assertEqual(rows['annotated.xml']['metadata']['word_count'], 650)
+        self.assertEqual(rows['annotated.xml']['metadata']['topic_en'], 'interview')
+
+    def test_a_document_without_metadata_reports_null_not_an_error(self):
+        self.assertIsNone(self._by_title()['bare.xml']['metadata'])
+
+    def test_has_metadata_filter(self):
+        without = set(self._by_title(has_metadata='false'))
+        self.assertIn('bare.xml', without)
+        self.assertNotIn('annotated.xml', without)
+
+        with_meta = set(self._by_title(has_metadata='true'))
+        self.assertEqual(with_meta, {'annotated.xml'})

@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Query
 from dataplane.core.security import AuthenticatedUser
 from dataplane.dependencies import get_current_user, get_kwic_service
 from dataplane.repositories.base import KwicSort
+from dataplane.schemas.metadata import MetadataFilterParams
 from dataplane.schemas.kwic import KWICHitOut, KWICSearchResponse
 from dataplane.services.kwic_service import KWICService
 
@@ -32,6 +33,12 @@ async def search_kwic(
     service: Annotated[KWICService, Depends(get_kwic_service)],
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
+    # The cross-feature secondary metadata filter — one Depends()-able params
+    # object instead of four Query() declarations repeated on seven endpoints
+    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # Sits here, before the defaulted params, so it needs no `= None` default:
+    # FastAPI always constructs it, and a default would imply it can be None.
+    metadata: Annotated[MetadataFilterParams, Depends()],
     q: Annotated[str, Query(min_length=1)],
     corrected: bool = False,
     window: int = 5,
@@ -47,6 +54,7 @@ async def search_kwic(
         page=page,
         per_page=per_page,
         sort=sort,
+        metadata_filter=metadata.to_filter(),
     )
 
     return KWICSearchResponse(

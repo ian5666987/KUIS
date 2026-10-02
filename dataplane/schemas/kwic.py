@@ -2,7 +2,9 @@
 declared directly on the router as FastAPI Query(...) params rather than a
 request schema — idiomatic for a GET endpoint, and each param needs its own
 validation (window clamping, per_page allowlist) that belongs in the
-service layer anyway (see kwic_service.py)."""
+service layer anyway (see kwic_service.py). The one exception is the
+cross-feature metadata filter, which is shared by every analysis endpoint and
+so lives in schemas/metadata.py — see that module's docstring for why."""
 
 from pydantic import BaseModel
 

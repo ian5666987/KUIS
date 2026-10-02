@@ -38,6 +38,7 @@ from dataplane.repositories.base import (
     ErrorFilter,
     ErrorFrequencyPage,
     ErrorFrequencyRow,
+    ErrorNodeCount,
     ErrorOccurrence,
     ErrorSummary,
     MatchMode,
@@ -213,19 +214,69 @@ async def count_error_occurrences(session: AsyncSession, document_ids: list[int]
 
 
 async def compute_error_summary(session: AsyncSession, document_ids: list[int]) -> ErrorSummary:
+    """Both the flat top-category totals and the full per-node breakdown
+    the frontend's expandable summary tree needs, from ONE scan of the
+    Tier-2 aggregate.
+
+    The roll-up to ancestors is done here in Python rather than with a
+    recursive CTE because `path` already spells out every ancestor's code
+    (segments of a path ARE codes, and codes are unique taxonomy-wide), so
+    no second query or self-join is needed to walk upward — and the grouped
+    row set is bounded by the taxonomy's ~90 nodes, not by the annotation
+    count. Keeping it off the client is the point: the summary endpoint
+    returns counts that are already subtree-inclusive, so no consumer
+    re-aggregates them.
+
+    The literal root segment (`eror`) is dropped, so `by_node` starts one
+    level down at the 4 top categories, matching what
+    taxonomy_repository.py::tree() returns for the same tree.
+    """
     if not document_ids:
-        return ErrorSummary(total=0, by_category=[])
+        return ErrorSummary(total=0, by_category=[], by_node=[])
 
     rows = (
         await session.execute(
-            select(error_taxonomy_node.c.top_category, func.sum(document_error_freq.c.count).label("count"))
+            select(
+                error_taxonomy_node.c.top_category,
+                error_taxonomy_node.c.path,
+                func.sum(document_error_freq.c.count).label("count"),
+            )
             .select_from(
                 document_error_freq.join(error_taxonomy_node, error_taxonomy_node.c.id == document_error_freq.c.taxonomy_node_id)
             )
             .where(document_error_freq.c.document_id.in_(document_ids))
-            .group_by(error_taxonomy_node.c.top_category)
+            .group_by(error_taxonomy_node.c.top_category, error_taxonomy_node.c.path)
         )
     ).all()
 
-    by_category = [ErrorCategoryCount(category=row.top_category, count=row.count) for row in rows]
-    return ErrorSummary(total=sum(c.count for c in by_category), by_category=by_category)
+    # Grouped by (top_category, path) above, so several rows can share a
+    # top_category — re-aggregate it here rather than adding a second query.
+    category_totals: dict[str, int] = {}
+    # code -> [subtree count, own count]. dict preserves first-seen order,
+    # which the sort below replaces anyway.
+    node_counts: dict[str, list[int]] = {}
+    node_paths: dict[str, str] = {}
+
+    for row in rows:
+        if row.top_category is not None:
+            category_totals[row.top_category] = category_totals.get(row.top_category, 0) + row.count
+
+        segments = row.path.split(";")
+        for depth in range(2, len(segments) + 1):  # from 2: skips the literal root
+            code = segments[depth - 1]
+            entry = node_counts.setdefault(code, [0, 0])
+            entry[0] += row.count
+            node_paths[code] = ";".join(segments[:depth])
+        # The last segment is the node the annotations actually resolved to.
+        if len(segments) >= 2:
+            node_counts[segments[-1]][1] += row.count
+
+    by_category = [ErrorCategoryCount(category=category, count=count) for category, count in category_totals.items()]
+    by_node = sorted(
+        (
+            ErrorNodeCount(code=code, path=node_paths[code], count=counts[0], self_count=counts[1])
+            for code, counts in node_counts.items()
+        ),
+        key=lambda node: (-node.count, node.code),
+    )
+    return ErrorSummary(total=sum(c.count for c in by_category), by_category=by_category, by_node=by_node)

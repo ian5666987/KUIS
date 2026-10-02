@@ -13,7 +13,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dataplane.core.config import settings
-from dataplane.routers import collocations, error_analytics, frequency, health, kwic, ngrams, taxonomy, whoami
+from dataplane.routers import (
+    collocations,
+    error_analytics,
+    frequency,
+    health,
+    kwic,
+    metadata,
+    ngrams,
+    taxonomy,
+    whoami,
+)
 
 app = FastAPI(
     title="KUIS Data Plane",
@@ -39,3 +49,6 @@ app.include_router(collocations.router)
 app.include_router(ngrams.router)
 app.include_router(error_analytics.router)
 app.include_router(taxonomy.router)
+# Reference data for the secondary metadata filter, alongside taxonomy
+# (docs/metadata-catalogue-plan.md).
+app.include_router(metadata.router)

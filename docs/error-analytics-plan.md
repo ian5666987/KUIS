@@ -29,8 +29,22 @@ Getting real annotation data required fixing a bug in `main/corpus_parsing.py`: 
 
 **Frontend** (`KUIS-FE`): `lib/taxonomy.ts` (tree-checkbox mechanics as pure functions), `components/features/analysis/{TaxonomyPicker,ErrorAnalytics,EpicTable,ErrorSummaryTable}.tsx`, `hooks/fastapi/{useTaxonomy,useErrorAnalytics}.ts`, wired into the analysis hub at `/analysis/error-analytics`.
 
+## Summary view: hierarchical breakdown
+
+The Summary tab is an expandable tree over the *whole* taxonomy, not just the 4 top categories: expanding `gramatikal` shows its subcategories, expanding one of those shows its leaf codes, each row carrying its count, its share of all errors, and its share of its parent.
+
+`GET /api/v1/error-summary` answers this in one scan of `DocumentErrorFreq` by adding `by_node` alongside the original `by_category` (kept as-is — it's the endpoint's published shape, and `by_node`'s top level carries the same numbers). Each entry is `{code, path, count, self_count}`, where **`count` is already subtree-inclusive**: the frontend never sums descendants to render a parent, it only divides a count by a total to get a percentage. Nodes with no errors in the selected corpora are absent from the response, and the frontend prunes those branches rather than rendering a wall of zeroes — the filter picker above the table is what exists to show what *could* be selected.
+
+The roll-up to ancestors happens in `_error_query.py::compute_error_summary` in Python, not in a recursive CTE, because `path` already spells out every ancestor's code (path segments ARE codes, and codes are unique taxonomy-wide) — so walking upward needs no second query and no self-join, and the grouped row set is bounded by the taxonomy's ~90 nodes rather than by the annotation count.
+
+`self_count` exists because `DocumentErrorFreq` rows point at whichever node an annotation's `features` resolved to, which **can be a non-leaf** (`features="eror;leksikal"` is real data — see `dataplane/tests/conftest.py`'s `CORPUS_XML`). When a category has errors of its own, its children genuinely don't sum to its total, so the table says so inline (`(N not sub-classified)`) instead of letting the arithmetic look broken. Note this is also the one place the summary and Error Frequency/EPIC disagree by design: `resolve_leaf_node_ids` filters `is_leaf = TRUE`, so a non-leaf-resolved annotation is counted by the summary but never matched by the two search features.
+
 ## Verification
 
-119/119 Django tests, 107/107 dataplane tests. End-to-end checked against real `corpus_db` data: category cascade, cross-branch union, and whole-tree-root queries all returned the expected counts. `npm run build`/`npm run lint` clean; the route resolves correctly on the dev server.
+139/139 Django tests, 115/115 dataplane tests (summary roll-up, self-vs-subtree counts, root exclusion, by_node/by_category agreement, and the empty-document-set case are covered in `test_error_analytics_repository.py::TestSummary` and `test_error_frequency_router.py`).
 
-**Not verified**: actual browser click-through (no browser tool available this session) — the indeterminate-checkbox visual state in particular is unconfirmed. A project-wide `retokenize` hasn't been run for real (dry-run showed nothing in the current `corpus_db` needs it).
+Checked against real `corpus_db` data through the running data plane: 32 errors over 19 nodes, with every category's children summing exactly to its own total (`ejaan` 18 = 10+4+3+1; `gramatikal` 11 = 3+3+3+2) and the top level summing to `total`. The frontend table was server-rendered against that live response in both collapsed and fully-expanded states — correct nesting at all three depths, biggest-first ordering within each level, both percentage columns, and `lainnya` (zero errors) pruned.
+
+End-to-end checked against real `corpus_db` data: category cascade, cross-branch union, and whole-tree-root queries all returned the expected counts. `npm run build`/`npm run lint` clean; the route resolves correctly on the dev server.
+
+**Not verified**: actual browser click-through (no browser tool available in either session) — the indeterminate-checkbox visual state, and clicking the summary tree's disclosure toggles, are unconfirmed (the summary tree's expanded output was verified by server-rendering it, not by clicking). A project-wide `retokenize` hasn't been run for real (dry-run showed nothing in the current `corpus_db` needs it).

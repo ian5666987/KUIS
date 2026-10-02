@@ -20,10 +20,12 @@ from fastapi import APIRouter, Depends, Query
 from dataplane.core.security import AuthenticatedUser
 from dataplane.dependencies import get_current_user, get_error_analytics_service
 from dataplane.repositories.base import MatchMode, SortDirection
+from dataplane.schemas.metadata import MetadataFilterParams
 from dataplane.schemas.error_analytics import (
     ErrorCategoryCountOut,
     ErrorFrequencyResponse,
     ErrorFrequencyRowOut,
+    ErrorNodeCountOut,
     ErrorOccurrenceOut,
     ErrorSummaryResponse,
     EpicSearchResponse,
@@ -38,6 +40,12 @@ async def search_error_frequency(
     service: Annotated[ErrorAnalyticsService, Depends(get_error_analytics_service)],
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
+    # The cross-feature secondary metadata filter — one Depends()-able params
+    # object instead of four Query() declarations repeated on seven endpoints
+    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # Sits here, before the defaulted params, so it needs no `= None` default:
+    # FastAPI always constructs it, and a default would imply it can be None.
+    metadata: Annotated[MetadataFilterParams, Depends()],
     error_code: Annotated[list[str] | None, Query()] = None,
     q: str | None = None,
     match: MatchMode = MatchMode.CONTAINS,
@@ -60,6 +68,7 @@ async def search_error_frequency(
         direction=direction,
         page=page,
         per_page=per_page,
+        metadata_filter=metadata.to_filter(),
     )
 
     return ErrorFrequencyResponse(
@@ -76,6 +85,12 @@ async def search_epic(
     service: Annotated[ErrorAnalyticsService, Depends(get_error_analytics_service)],
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
+    # The cross-feature secondary metadata filter — one Depends()-able params
+    # object instead of four Query() declarations repeated on seven endpoints
+    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # Sits here, before the defaulted params, so it needs no `= None` default:
+    # FastAPI always constructs it, and a default would imply it can be None.
+    metadata: Annotated[MetadataFilterParams, Depends()],
     error_code: Annotated[list[str] | None, Query()] = None,
     window: int = 5,
     page: int = 1,
@@ -87,6 +102,7 @@ async def search_epic(
         window=window,
         page=page,
         per_page=per_page,
+        metadata_filter=metadata.to_filter(),
     )
 
     return EpicSearchResponse(
@@ -103,10 +119,19 @@ async def get_error_summary(
     service: Annotated[ErrorAnalyticsService, Depends(get_error_analytics_service)],
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
+    # The cross-feature secondary metadata filter — one Depends()-able params
+    # object instead of four Query() declarations repeated on seven endpoints
+    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # Sits here, before the defaulted params, so it needs no `= None` default:
+    # FastAPI always constructs it, and a default would imply it can be None.
+    metadata: Annotated[MetadataFilterParams, Depends()],
 ) -> ErrorSummaryResponse:
-    result = await service.summary(corpus_ids)
+    result = await service.summary(corpus_ids, metadata.to_filter())
 
     return ErrorSummaryResponse(
         total=result.total,
         by_category=[ErrorCategoryCountOut(category=c.category, count=c.count) for c in result.by_category],
+        by_node=[
+            ErrorNodeCountOut(code=n.code, path=n.path, count=n.count, self_count=n.self_count) for n in result.by_node
+        ],
     )

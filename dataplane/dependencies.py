@@ -4,7 +4,8 @@ FastAPI dependencies shared across routers (architecture plan §1/§3).
 get_current_user / require_staff: Phase 1. get_db_session / get_kwic_service:
 Phase 2. get_frequency_service / get_collocation_service / get_ngram_service:
 Phase 4, alongside their repositories. get_error_analytics_service /
-get_taxonomy_service: docs/error-analytics-plan.md.
+get_taxonomy_service: docs/error-analytics-plan.md. get_metadata_service:
+docs/metadata-catalogue-plan.md.
 """
 
 from typing import Annotated
@@ -19,12 +20,14 @@ from dataplane.repositories.postgres.collocation_repository import PostgresCollo
 from dataplane.repositories.postgres.error_analytics_repository import PostgresErrorAnalyticsRepository
 from dataplane.repositories.postgres.frequency_repository import PostgresFrequencyRepository
 from dataplane.repositories.postgres.kwic_repository import PostgresKWICRepository
+from dataplane.repositories.postgres.metadata_repository import PostgresMetadataRepository
 from dataplane.repositories.postgres.ngram_repository import PostgresNgramRepository
 from dataplane.repositories.postgres.taxonomy_repository import PostgresTaxonomyRepository
 from dataplane.services.collocation_service import CollocationService
 from dataplane.services.error_analytics_service import ErrorAnalyticsService
 from dataplane.services.frequency_service import FrequencyService
 from dataplane.services.kwic_service import KWICService
+from dataplane.services.metadata_service import MetadataService
 from dataplane.services.ngram_service import NgramService
 from dataplane.services.taxonomy_service import TaxonomyService
 
@@ -75,3 +78,7 @@ def get_error_analytics_service(session: Annotated[AsyncSession, Depends(get_db_
 
 def get_taxonomy_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> TaxonomyService:
     return TaxonomyService(session, PostgresTaxonomyRepository(session))
+
+
+def get_metadata_service(session: Annotated[AsyncSession, Depends(get_db_session)]) -> MetadataService:
+    return MetadataService(session, PostgresMetadataRepository(session))

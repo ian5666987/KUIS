@@ -22,7 +22,12 @@
 | 6 | RBAC enforcement + Corpus/Document CRUD API + KUIS-FE management pages | ✅ done (2026-09-25) |
 | 6.5 | KUIS-FE rebuilt on its own CLAUDE.md playbook (TanStack Query, hooks/, components/ui/) + full parity (public pages, register, dashboard, profile, persistent corpus selection, CSV export) | ✅ done (2026-09-26) |
 | 6.6 | KWIC (Legacy)/KWIC (Fast) restored as distinct pages + the missing sort-by-position control | ✅ done (2026-09-26) |
-| 7 | Error Analytics (new build) | ⬜ not started — design finalized (2026-09-24), taxonomy blocker resolved |
+| 6.7 | Content-hash upload dedup (`docs/content-hash-dedup.md`) | ✅ done (2026-09-28) |
+| 6.8 | Public/private corpora (`Corpus.is_public`, enforced on both surfaces) | ✅ done (2026-09-29) |
+| 7 | Error Analytics (new build): Error Frequency + EPIC + taxonomy picker (`docs/error-analytics-plan.md`) | ✅ done (2026-09-29) |
+| 7.5 | User management for Admins + Super Admins (`docs/user-management-plan.md`) | ✅ done (2026-10-02) |
+| 7.6 | Error Summary hierarchical breakdown (`by_node` roll-up + expandable tree) | ✅ done (2026-10-02) |
+| 7.7 | Document metadata catalogue + secondary filters (`docs/metadata-catalogue-plan.md`, `docs/metadata-matching.md`) | ✅ done (2026-10-02) — not yet loaded into `corpus_db` |
 | 8 | Caching (Tier 4) + retire superseded Django views | ⬜ not started |
 
 ### Phase 0 — done, what actually landed
@@ -272,7 +277,32 @@
 
 *(Status: ✅ done. Nothing committed to git in either repo.)*
 
-### Phase 7 — planned, not yet started
+### Phase 6.7 — Content-hash upload dedup, done
+
+Re-uploading the same file stopped creating a second `Document`. Full write-up: `docs/content-hash-dedup.md`.
+
+`Document.content_hash` became the real dedup key, computed **synchronously at upload** (not in the worker) so the decision is made before a row exists, and made race-safe by a DB unique constraint plus `get_or_create` — migration `0010`, applied only after `backfill_content_hash` reported zero collisions on real data. The hash input is canonicalized (BOM, CRLF, surrounding whitespace, `ET.canonicalize` for structured XML) because those are the ways two exports of the same document routinely differ; what gets **stored** is always the exact raw text.
+
+The one behaviour worth remembering downstream: a dedup hit never renames or reassigns the existing document — `title`/`user` are in `get_or_create`'s `defaults`, so whichever upload won the race owns it. Phase 7.7's metadata matching has to reckon with that.
+
+All six upload paths funnel through `main/document_ingest.py`, a deliberately neutral module so the three upload-site modules and the worker can all import it without reaching into each other's internals.
+
+*(Status: ✅ done. Migration `0010` applied to `corpus_db`; all upload paths use it.)*
+
+### Phase 6.8 — Public/private corpora, done
+
+`Corpus.is_public` (migration `0011`, `default=True` so no existing corpus changed visibility): public corpora are visible to every registered user, private ones only to staff. The toggle is admin-only.
+
+Enforced **independently on both surfaces** — `main/views.py`'s `corpus_dashboard`/`corpus_detail` and `main/api_corpus.py`'s `CorpusListView`/`CorpusDetailView` — because both are live at once (`docs/ONBOARDING.md` §1), so neither can rely on the other to filter. A private corpus requested by a non-staff user is a `404`, not a `403`: a 403 would confirm it exists.
+
+*(Status: ✅ done. This phase is also where `dataplane/models/tables.py` was found to be missing `is_public` — pre-existing drift added by migration `0011` but never mirrored, exactly the trap `test_schema_drift.py` exists to catch. Fixed in passing during Phase 7.)*
+
+### Phase 7 — done, what actually landed
+
+> The design below is kept as written on 2026-09-24, as the record of what was
+> intended. What actually shipped, and where it deviated, is the status block at
+> the end of this section. `docs/error-analytics-plan.md` is the maintained
+> reference for the feature as built.
 
 **The blocker that held this phase back through Phases 0-5 — "no documented error-type taxonomy" (`docs/ONBOARDING.md` §3/§9) — is resolved.** `info/error.xml` is a machine-readable taxonomy (a `NETWORK`/`SYSTEM`/`FEATURE` tree: 4 top categories — `leksikal`, `gramatikal`, `ejaan`, `lainnya` — descending through optional subcategories to ~90 leaf error codes, each with an Indonesian gloss + example), confirmed via full-repo grep to have **zero existing code references** anywhere — not imported, not parsed, not cross-referenced. It maps exactly onto the `features="eror;gramatikal;frasa-nomina;nomafx"` semicolon-path attribute already present on real `<segment>` elements in uploaded documents, which the tokenizer has always silently discarded. The design below was produced in a planning session on 2026-09-24 and is ready to build; nothing has been implemented yet.
 
@@ -308,7 +338,55 @@ plus a small, decoupled `TaxonomyRepository` (`tree() -> list[TaxonomyNodeOut]`)
 - Taxonomy lives in Django (owns + admin-manages `ErrorTaxonomyNode`, like `WordType`) with FastAPI reading it read-only — consistent with every other Django-owned table FastAPI already reads, but worth a final confirm once building starts.
 - `ErrorAnnotation.state != 'active'` rows: planned to be excluded from analytics reads by default but kept (not deleted) for audit/debugging.
 
-*(Status: ⬜ not started. Design above is finalized and the two consequential decisions — nested-segment fix + retokenize, no staff gate — are confirmed. Next step is implementation: taxonomy model + loader, `ErrorAnnotation`/`DocumentErrorFreq` migration, the corpus_parsing.py refactor, worker tasks, FastAPI layer, KUIS-FE page — in that order, each verified against the isolated test database before touching `corpus_db`, matching every prior phase's discipline.)*
+*(Status: ✅ done, with three deviations from the design above — see `docs/error-analytics-plan.md` for the feature as built.*
+
+*Deviation 1, the filter model: the planned `category_path` + `path__startswith` subtree filter was replaced by a **flat, OR-combined list of taxonomy codes at any depth**, resolved with `concat(';', path, ';') LIKE '%;code;%'` against the ~90-row table. One mechanism then handles both a leaf hit and a whole-category subtree, and it matches what a checkbox tree actually implies — an earlier revision AND-combined a separate drill-down axis and was dropped once the real picker existed, because AND-across-branches is not how anyone expects checkboxes to behave. `ErrorFilter(codes=...)` replaced the planned `category_path` parameter throughout.*
+
+*Deviation 2: `ErrorTaxonomyNode` gained the denormalized `top_category` column the design floated as optional, set at load time by `load_error_taxonomy`, and `summary()` groups on it rather than splitting `path` at query time.*
+
+*Deviation 3: the Summary view shipped tabular as planned, then was extended in Phase 7.6 into a hierarchical tree — see that block.*
+
+*The two consequential decisions held: the nested-segment tokenizer bug was fixed in `main/corpus_parsing.py::_walk_body` (and the `retokenize --dry-run` reported nothing in `corpus_db` needed recomputing), and there is no staff gate. The open question about omission-type errors is still open — the real data available has none. `ErrorAnnotation.state != 'active'` rows are excluded from reads and kept, as planned.)*
+
+### Phase 7.5 — User management, done
+
+Admins CRUD/block/soft-delete regular Users; Super Admins do the same over Admins. Full write-up: `docs/user-management-plan.md`.
+
+A `UserProfile` sidecar (`blocked_at/by`, `deleted_at/by`, migration `0013`) rather than a custom `AUTH_USER_MODEL` — swapping that 12 migrations in, with `Document.user`, `Corpus.created_by` and `token_blacklist` already pointing at `auth.User`, would be a large, high-risk change for four columns. Rows are created lazily, never backfilled.
+
+Delete is always **soft**: `Document.user` is `on_delete=CASCADE`, so a hard delete would take every document that account ever uploaded, and all its derived Tier-1/2 analytics rows, with it. `is_staff`/`is_superuser` are set server-side from *which endpoint was called*, never read from the request body, and Super Admins are excluded from both tiers' querysets entirely. Refresh tokens are blacklisted on block and on delete, because `TokenRefreshView` does not recheck `is_active`.
+
+One shared CRUD implementation (`_AccountQuerysetMixin` in `main/api_users.py`), two two-line subclass tiers. `is_superuser` was added as a JWT claim, so the data plane and KUIS-FE see the tier without a Django round-trip.
+
+*(Status: ✅ done. The RBAC *rule* is still the single `is_staff` boolean Phase 6 enforced; this phase added the Super Admin tier on top of it, for user management only. No analysis endpoint gained a gate.)*
+
+### Phase 7.6 — Error Summary hierarchical breakdown, done
+
+The Summary tab became an expandable tree over the whole taxonomy rather than the four top categories: expanding `gramatikal` shows its subcategories, expanding one of those shows its leaf codes, each row carrying its count, its share of all errors, and its share of its parent.
+
+`GET /api/v1/error-summary` answers it in one scan of `DocumentErrorFreq` by adding `by_node` alongside the original `by_category`, which is kept as-is — it is the endpoint's published shape, and `by_node`'s top level carries the same numbers. Each entry is `{code, path, count, self_count}` with **`count` already subtree-inclusive**, so the frontend never sums descendants to render a parent; it only divides to get a percentage.
+
+The roll-up happens in Python in `_error_query.py::compute_error_summary`, not a recursive CTE, because `path` already spells out every ancestor's code — path segments *are* codes, and codes are unique taxonomy-wide — so walking upward needs no second query and no self-join, and the grouped row set is bounded by the taxonomy's ~90 nodes rather than by the annotation count.
+
+`self_count` exists because a `DocumentErrorFreq` row can point at a **non-leaf** node (`features="eror;leksikal"` is real data). When a category has errors of its own, its children genuinely do not sum to its total, so the table says so inline rather than letting the arithmetic look broken. This is also the one place the Summary and Error Frequency/EPIC disagree by design: `resolve_leaf_node_ids` filters `is_leaf = TRUE`, so a non-leaf-resolved annotation is counted by the Summary but never matched by the two search features.
+
+*(Status: ✅ done. Verified against real `corpus_db` data through the running data plane — 32 errors over 19 nodes, every category's children summing exactly to its own total and the top level summing to `total`. Browser click-through of the disclosure toggles is unverified; the expanded output was checked by server-rendering it.)*
+
+### Phase 7.7 — Document metadata catalogue + secondary filters, done
+
+The first **secondary scoping axis** in the app. Until now every analysis feature scoped on one thing: which corpora are selected. A per-document metadata catalogue (`metadata/*.csv` — University, Year, Grade, Topic, Topic-English, word count, name code) is now a table, each row linked to its uploaded `Document`, and University/Year/Grade/name code filter every analysis feature on both surfaces. Full write-up: `docs/metadata-catalogue-plan.md`; the matching rules are their own reference, `docs/metadata-matching.md`.
+
+Three things make this phase worth reading even though it touched no query logic:
+
+**The filter is applied at exactly one point per surface** — `dataplane/repositories/shared.py::resolve_document_ids` and `main/views.py::_get_selected_documents`. Both already turned a corpus selection into document ids, so **no repository, SQL builder, worker task or Django analysis view changed**, and all five Django `/export/` routes inherited the filter for free. The per-repository alternative would have touched 9 ABC signatures, 6 repositories and 6 query builders. `DocumentWordFreq`/`DocumentNgram`/`DocumentErrorFreq` are per-document grain, so narrowing the id list just sums over fewer rows — the same reason Tier 2 needed no rework.
+
+**A LEFT OUTER JOIN collapses the hard requirement into one expression.** A facet's "(no value)" option has to match both a catalogue row whose field is empty *and* a document with no catalogue row at all. Joined from the document side, `IS NULL` is true in both cases, so there is no second code path for "documents without metadata" anywhere in either surface. Django's ORM reaches the same thing — `catalogue_entry__university__isnull=True` promotes the join to LEFT OUTER.
+
+**`DocumentMetadata` holds a nullable FK to `Document`, not the reverse** (migration `0014`). The catalogue is the authority and loads independently of upload order, so resolution runs in both directions: `get_or_create_document` links a new upload against the loaded catalogue, and `load_metadata_catalogue` links each row against already-uploaded documents. This also left `main_document` untouched, so nothing in `dataplane/models/tables.py`'s `document` needed re-mirroring.
+
+New: `main/metadata_catalogue.py` (neutral module — the match formula, the importer, the filter vocabulary, following `main/document_ingest.py`'s own reasoning for existing), `main/management/commands/load_metadata_catalogue.py`, `GET /api/v1/metadata-facets` as a reference-data trio modelled on `taxonomy`, and `dataplane/schemas/metadata.py` — the one shared **request** schema in that package, since the same four params ride on all seven analysis endpoints.
+
+*(Status: ✅ done — 184/184 Django tests, 146/146 data plane tests, `npm run build`/`lint` clean, and all seven endpoints exercised against a live `uvicorn` data plane on the isolated test database. **Not yet applied to `corpus_db`**: migration `0014` is unapplied there and the catalogue is unimported — see `docs/metadata-catalogue-plan.md`'s loading section for the exact sequence. `metadata/*.csv` is now tracked in git.)*
 
 ---
 
@@ -376,7 +454,7 @@ KUIS/
   .github/workflows/{ci,deploy}.yml
 ```
 
-*(Status: the tree above exists, fully populated for KWIC/Frequency/Collocation/Ngram — `repositories/postgres/`, `services/`, `schemas/`, `routers/` all written and parity-tested (Phase 2 for KWIC, Phase 4 for the other three, all swapped onto Tier-2 aggregate tables in Phase 5). `repositories/base.py` defines all 5 ABCs; `ErrorAnalyticsRepository` is the only one with no concrete implementation yet — its replacement interface (frequency/occurrences/count_occurrences/summary, plus a decoupled `TaxonomyRepository`) is designed in the Phase 7 status block above, not yet built. `worker/tasks/{indexing,aggregates}.py` are real and worker-verified — Phase 5; `worker/tasks/error_annotations.py` is planned there too. `worker/tasks/maintenance.py` is still empty.)*
+*(Status: the tree above exists and **every repository ABC now has a concrete Postgres implementation** — `repositories/postgres/`, `services/`, `schemas/`, `routers/` written and parity-tested for KWIC (Phase 2), Frequency/Collocation/Ngram (Phase 4, swapped onto Tier-2 aggregates in Phase 5) and ErrorAnalytics + Taxonomy (Phase 7). Two more were added after this tree was drawn: `MetadataRepository` (Phase 7.7, facet values for the secondary filter) and nothing else. `worker/tasks/{indexing,aggregates,error_annotations}.py` are all real and worker-verified. `worker/tasks/maintenance.py` is still empty — `retokenize` stays a management command.)*
 
 **What maps to what** (reuse, don't duplicate):
 
@@ -417,7 +495,7 @@ Django's migrations stay the only schema authority. FastAPI's `dataplane/models/
 
 **Who reads**: FastAPI, via SQLAlchemy against the same tables. Because two independent schema definitions now exist (Django's ORM, FastAPI's SQLAlchemy `Table` objects), add a CI check: a Django management command dumps `(table, column, type)` from `main.models._meta`, diffed against `dataplane/models/tables.py`'s metadata — a concrete guard against silent drift, which is the main risk of the consumer/owner split.
 
-*(Status: ✅ done, with one deliberate deviation. `WordType`, `Token.word_type` (replacing `Token.word`), `DocumentWordFreq`, `Document.status`/`content_hash`/`tokenized_hash`/`tokenizer_version` all landed exactly as described. `DocumentNgram` uses a plain `JSONField` for `word_type_ids` instead of the described `Ngram` dimension table + `ArrayField` — `ArrayField` is Postgres-only and this project's Django tests/CI deliberately run on SQLite; see the Phase 5 status block above for the reasoning. The optional composite-PK/BRIN-index stretch items were not done.)*
+*(Status: ✅ done, with one deliberate deviation. Migrations since: `0010` content-hash unique (6.7), `0011` `Corpus.is_public` (6.8), `0012` the three error-analytics models (7), `0013` `UserProfile` (7.5), `0014` `DocumentMetadata` (7.7) — all pure additions, no further expand/backfill/contract dance. `WordType`, `Token.word_type` (replacing `Token.word`), `DocumentWordFreq`, `Document.status`/`content_hash`/`tokenized_hash`/`tokenizer_version` all landed exactly as described. `DocumentNgram` uses a plain `JSONField` for `word_type_ids` instead of the described `Ngram` dimension table + `ArrayField` — `ArrayField` is Postgres-only and this project's Django tests/CI deliberately run on SQLite; see the Phase 5 status block above for the reasoning. The optional composite-PK/BRIN-index stretch items were not done.)*
 
 ---
 
@@ -501,7 +579,7 @@ KUIS-FE/
 
 **Corpus selection state**: Django currently keeps this server-side in the session ([views.py:382-402](../main/views.py#L382-L402)), which doesn't translate to a stateless JWT client. Continue the shareable-URL pattern KUIS already uses (`docs/ONBOARDING.md` §7 — "Ids also travel in the query string... so feature URLs stay shareable"): carry selected corpus ids as Next.js URL search params, just without the session fallback.
 
-*(Status: scaffold exists and builds/lints clean. `analysis/kwic` (Phase 3) and `analysis/{frequency,collocations,ngrams}` (Phase 4) are all real and Playwright-verified end to end, the latter three against BOTH an isolated fixture and the real `corpus_db` with hand-computed expected values. `analysis/error-analytics` and the dedicated `/corpus` management page remain stubs.)*
+*(Status: scaffold exists and builds/lints clean. Every analysis page is now real: `analysis/kwic` + `analysis/kwic/search` (Phases 3/6.6), `analysis/{frequency,collocations,ngrams}` (Phase 4, Playwright-verified against both an isolated fixture and the real `corpus_db` with hand-computed expected values), `analysis/error-analytics` (Phase 7, with the Phase 7.6 summary tree). The `/corpus` management pages and `/users` landed in Phases 6/6.5/7.5. Phase 6.5 rebuilt the whole app on `KUIS-FE/CLAUDE.md`, which is now the authority for the frontend's own structure — this section describes the original scaffold, not the current tree.)*
 
 ---
 
@@ -530,8 +608,10 @@ Matches the verified house pattern (checked against `identity-service-internal`'
 5. **Remaining feature ports** — ✅ done. Word frequency, collocations, and n-grams all shipped together on one shared self-join query builder (window-function-equivalent, against raw `Token`), parity-checked against Django twice — once for exact set+order on an isolated fixture, once against the real `corpus_db` with hand-computed expected values through a real browser. Legacy KWIC stayed folded into fast-KWIC's phrase-search extension from Phase 2, not separately ported.
 6. **Tier 1/2 schema optimization** — ✅ done. `WordType`, normalized `Token` (word_type FK replacing word), `DocumentWordFreq`, `DocumentNgram` migrations applied to the real `corpus_db` (with explicit confirmation, verified in stages); the worker populates them for new uploads and `backfill_tier2` populated them for the 3 pre-existing real documents; frequency/collocation/ngram repositories swapped onto the new tables with Service/Router/Next.js genuinely untouched (confirmed via `git status` in KUIS-FE, not just claimed). KWIC's repository also needed a fix (word_type join) since `Token.word` disappeared, though it doesn't swap onto an aggregate table — concordance search needs position-level data no aggregate can provide.
 7. **RBAC enforcement + Corpus/Document CRUD API** — ✅ done. The permission *rule* already existed and was already correctly enforced server-side (a single `is_staff` boolean, consistent across Django views, JWT claims, and the FastAPI `require_staff` dependency); this phase exposed corpus/document writes over the API for the first time and built real KUIS-FE pages on top of it, including the cosmetic `is_staff` UI gating the Phase 1 design always intended but never implemented until now. Verified via 20 new Django tests (63/63 total) and a live, non-destructive check against the user's own already-running dev servers. Full detail in the Phase 6 status block above.
-8. **Error Analytics (new build)** — ⬜ not started. The taxonomy blocker (`docs/ONBOARDING.md` §3/§9) is resolved — `info/error.xml` is a real, machine-readable taxonomy, confirmed to have zero existing code references. Full design (data model, parsing changes, worker tasks, FastAPI repository interface, KUIS-FE plan, and the two decisions already confirmed with the user) is written up in the Phase 7 status block above, ready to implement.
-9. **Caching (Tier 4) + cleanup** — ⬜ not started. Redis-backed cache at the Service layer, keyed on `(sorted corpus ids, mode, feature, n)`. This is also when the now-superseded Django live-parse views finally retire.
+8. **Error Analytics (new build)** — ✅ done. The taxonomy blocker (`docs/ONBOARDING.md` §3/§9) was resolved by `info/error.xml`. Shipped as Error Frequency + EPIC behind one flat OR-combined code filter (not the planned `path__startswith` subtree axis — see the Phase 7 status block for why), a decoupled `/api/v1/taxonomy`, three models in migration `0012`, and the nested-segment tokenizer fix. Extended in Phase 7.6 with the hierarchical Summary. `docs/error-analytics-plan.md`.
+9. **Caching (Tier 4) + cleanup** — ⬜ not started. Redis-backed cache at the Service layer, keyed on `(sorted corpus ids, mode, feature, n)`. This is also when the now-superseded Django live-parse views finally retire. **Note the key is now wider than planned**: the Phase 7.7 metadata filter is a second scoping axis, so any cache key has to include it (and the error-analytics code filter) or a filtered request will serve an unfiltered result.
+
+**Shipped outside the original eight.** Each is a numbered sub-phase above, with its own doc where the design warranted one: content-hash dedup (6.7), public/private corpora (6.8), user management for Admins + Super Admins (7.5), the Error Summary tree (7.6), and the document metadata catalogue + secondary filters (7.7).
 
 ---
 
@@ -539,8 +619,8 @@ Matches the verified house pattern (checked against `identity-service-internal`'
 
 - **Per-feature parity**: for each FastAPI port, run a script comparing its JSON output against the equivalent Django view's rendered/CSV-export data for a fixed corpus selection, before wiring the Next.js page to it. ✅ done for all four features — fast-KWIC against `/analysis/kwic/{search/,}export/` (Phase 2); word frequency, collocations, and n-grams (n=3, n=5) against `/analysis/{frequency,collocations,ngrams}/export/` (Phase 4), checked for exact row SET and exact row ORDER (including the count-tie alphabetical case) — exact match every time, on a real Postgres database seeded with known data.
 - **Auth**: confirm a JWT obtained from `POST /api/auth/token/` is accepted by a FastAPI endpoint with no Django call in the request path; confirm the existing session-cookie login still works unmodified. ✅ done — verified manually end-to-end and now covered permanently by `main/tests.py::JWTAuthTests` + `dataplane/tests/`.
-- **Schema drift check**: CI command comparing Django's `_meta` schema dump against `dataplane/models/tables.py`. ✅ done in Phase 2, ahead of the original Phase 5 schedule — `dataplane/tests/test_schema_drift.py`, part of the CI `dataplane-tests` job. Deliberately broken (a column renamed) and confirmed to fail with a clear message, then confirmed to pass again once reverted. Will need extending, not rewriting, once Tier 1/2 tables are added in Phase 5.
-- **Django regression**: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: python manage.py test main` must keep passing unmodified throughout every phase. ✅ passing as of Phase 0 (29/29).
+- **Schema drift check**: CI command comparing Django's `_meta` schema dump against `dataplane/models/tables.py`. ✅ done in Phase 2, ahead of the original Phase 5 schedule — `dataplane/tests/test_schema_drift.py`, part of the CI `dataplane-tests` job. Deliberately broken (a column renamed) and confirmed to fail with a clear message, then confirmed to pass again once reverted. Extended, not rewritten, for Tier 1/2 (Phase 5), the three error-analytics tables (Phase 7) and `document_metadata` (Phase 7.7) — 10 tables plus the M2M through table. Each addition needs three edits in that file (import, `SA_TABLES`, `parametrize`); one without the others silently defeats the guard.
+- **Django regression**: `DB_ENGINE=django.db.backends.sqlite3 DB_NAME=:memory: CELERY_TASK_ALWAYS_EAGER=1 python manage.py test main` must keep passing unmodified throughout every phase. ✅ passing — 29/29 at Phase 0, **184/184** as of Phase 7.7. The data plane suite needs a real Postgres whose `DB_NAME` contains "test": `DB_NAME=kuis_dataplane_test CELERY_TASK_ALWAYS_EAGER=1 python -m pytest` — **146/146**. `CELERY_TASK_ALWAYS_EAGER=1` is required for both since Phase 5 removed the `post_save` signal; without it 16 Django tests and most data plane tests fail on missing tokens.
 - **Worker**: upload a document, confirm `Document.status` moves `indexing` → `ready`. ✅ done — verified against a real Redis broker and a real `celery worker` process (not just eager-mode tests): a document created and indexed showed `status='indexing'` mid-task and `status='ready'` with tokens/hash/aggregates all populated once the worker finished, confirmed by inspecting the worker's own log output for the task IDs actually executing.
 - **Deployment**: `docker compose build` succeeds for all three KUIS services plus KUIS-FE; each container starts and responds on its internal port. ✅ verified for `dataplane` (built image + container run + `/health` response). `django`/`worker` images not yet build-tested; KUIS-FE has no Dockerfile yet.
 - **End-to-end**: from KUIS-FE, log in, select a corpus, run KWIC — confirm results match the legacy Django page. ✅ done for all four features, in two separate real-browser (Playwright) rounds. KWIC (Phase 3): login, corpus selection, phrase search matching Phase 2's parity-checked count exactly, a shareable URL that replays the search on reload, corrected-mode search, reviewed screenshot, zero CORS errors. Frequency/collocations/n-grams (Phase 4): a second round against the REAL `corpus_db` and the real `admin` account, asserting exact hand-computed top results (not just "some results appeared") for all three, plus a cross-feature check that n-grams at n=2 exactly matches the separate collocations page's top result.

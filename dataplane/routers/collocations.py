@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from dataplane.core.security import AuthenticatedUser
 from dataplane.dependencies import get_collocation_service, get_current_user
 from dataplane.repositories.base import MatchMode, SortDirection
+from dataplane.schemas.metadata import MetadataFilterParams
 from dataplane.schemas.ranked import RankedRowOut, RankedSearchResponse
 from dataplane.services.collocation_service import CollocationService
 
@@ -19,6 +20,12 @@ async def search_collocations(
     service: Annotated[CollocationService, Depends(get_collocation_service)],
     _user: Annotated[AuthenticatedUser, Depends(get_current_user)],
     corpus_ids: Annotated[list[int], Query(min_length=1)],
+    # The cross-feature secondary metadata filter — one Depends()-able params
+    # object instead of four Query() declarations repeated on seven endpoints
+    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # Sits here, before the defaulted params, so it needs no `= None` default:
+    # FastAPI always constructs it, and a default would imply it can be None.
+    metadata: Annotated[MetadataFilterParams, Depends()],
     q: str | None = None,
     match: MatchMode = MatchMode.CONTAINS,
     sort: str = "count",
@@ -38,6 +45,7 @@ async def search_collocations(
         direction=direction,
         page=page,
         per_page=per_page,
+        metadata_filter=metadata.to_filter(),
     )
 
     return RankedSearchResponse(

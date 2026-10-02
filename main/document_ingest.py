@@ -19,6 +19,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from .corpus_parsing import looks_like_structured_xml
+from .metadata_catalogue import link_catalogue_entry
 from .models import Document
 
 _CRLF_RE = re.compile(r"\r\n?")
@@ -88,9 +89,24 @@ def get_or_create_document(*, title, content, user):
     Never touches corpus membership and never dispatches indexing — that's
     the caller's job (skip index_document.delay() when created is False; a
     reused document is already indexed).
+
+    Does do one local thing beyond the insert: on a NEW document, links it to
+    its metadata catalogue entry (docs/metadata-catalogue-plan.md). That's
+    synchronous and here, rather than in the worker and rather than repeated
+    at all six upload sites, for the same reason content_hash is computed
+    here — a document has to be visible to metadata filters the moment it
+    exists, and this is the one path every upload already funnels through.
+    It's a single indexed lookup, and a miss is not an error (the document
+    simply reads as having no metadata). A dedup hit is correctly skipped:
+    the existing document was linked when it was first created.
     """
     content_hash = compute_content_hash(content)
-    return Document.objects.get_or_create(
+    document, created = Document.objects.get_or_create(
         content_hash=content_hash,
         defaults={"title": title, "content": content, "user": user},
     )
+
+    if created:
+        link_catalogue_entry(document)
+
+    return document, created

@@ -2,7 +2,8 @@
 and /ngrams — the three "ranked" analysis features share one response shape
 (frequency and collocations use it as-is, ngrams adds `n`). Request
 parameters are declared directly on each router as FastAPI Query(...)
-params, same reasoning as schemas/kwic.py."""
+params, same reasoning as schemas/kwic.py — including its note on the one
+shared exception, schemas/metadata.py."""
 
 from pydantic import BaseModel
 

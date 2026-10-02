@@ -33,6 +33,11 @@ docs/error-analytics-plan.md: `error_taxonomy_node`, `error_annotation`,
 `document_error_freq` added — mirrors main.models.{ErrorTaxonomyNode,
 ErrorAnnotation, DocumentErrorFreq} column-for-column, same as every other
 table here.
+
+docs/metadata-catalogue-plan.md: `document_metadata` added, mirroring
+main.models.DocumentMetadata. Note `main_document` itself is deliberately
+UNCHANGED by that feature — the FK points this way, so nothing above had to
+be re-mirrored.
 """
 
 from sqlalchemy import (
@@ -165,4 +170,28 @@ document_error_freq = Table(
     Column("document_id", BigInteger),
     Column("taxonomy_node_id", BigInteger),
     Column("count", Integer),
+)
+
+# docs/metadata-catalogue-plan.md. `document_id` is nullable because a
+# catalogue row exists whether or not its file has been uploaded yet — and
+# every analysis column is nullable because the secondary filter's "(no
+# value)" option has to treat "entry exists, field empty" and "no entry at
+# all" alike. Joined LEFT OUTER from the document side in
+# dataplane/repositories/shared.py, which is what makes NULL mean both.
+document_metadata = Table(
+    "main_documentmetadata",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("source_filename", String(200)),
+    Column("match_key", String(200)),
+    Column("document_id", BigInteger, nullable=True),
+    Column("university", String(50), nullable=True),
+    Column("year", Integer, nullable=True),
+    Column("grade", Integer, nullable=True),
+    Column("topic", String(100), nullable=True),
+    Column("topic_en", String(100), nullable=True),
+    Column("word_count", Integer, nullable=True),
+    Column("name_code", String(50), nullable=True),
+    Column("source_file", String(100)),
+    Column("imported_at", DateTime(timezone=True)),
 )

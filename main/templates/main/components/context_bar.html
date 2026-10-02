@@ -18,7 +18,10 @@
   {% comment %} Marker so the view can tell "submitted with nothing ticked" apart from
      "not submitted at all" — otherwise a selection could never be cleared. {% endcomment %}
   <input type="hidden" name="corpus_selection" value="1">
-  {% hidden_params exclude="corpus,corpus_selection,corrected,page" %}
+  {% comment %} The metadata facet params must be excluded here: they have real
+     controls in the panel below, so re-emitting them as hidden inputs would
+     submit every value twice (docs/metadata-catalogue-plan.md). {% endcomment %}
+  {% hidden_params exclude="corpus,corpus_selection,corrected,page,university,year,grade,name_code" %}
 
   <div class="context__summary">
 
@@ -41,6 +44,7 @@
         {{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }} ·
         {{ document_count }} file{{ document_count|pluralize }} ·
         {{ selection_token_total|intcomma }} tokens
+        {% if metadata_filter_active %}· <strong>filtered</strong>{% endif %}
       </span>
     </div>
 
@@ -76,5 +80,7 @@
     </p> -->
 
     {% include 'main/components/corpus_picker.html' %}
+
+    {% include 'main/components/metadata_picker.html' %}
   </div>
 </form>

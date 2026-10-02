@@ -70,6 +70,33 @@ def test_error_summary_groups_by_top_category(client, auth_headers, seeded_corpu
     assert body["total"] == 3
 
 
+def test_error_summary_breaks_down_every_node_in_the_hierarchy(client, auth_headers, seeded_corpus):
+    response = client.get(
+        "/api/v1/error-summary", params={"corpus_ids": [seeded_corpus["error_corpus_id"]]}, headers=auth_headers,
+    )
+
+    body = response.json()
+    by_node = {row["code"]: row for row in body["by_node"]}
+    # The frontend's expandable summary tree traverses these — intermediate
+    # nodes included, each already subtree-inclusive so nothing is summed
+    # client-side.
+    assert by_node["gramatikal"]["count"] == 1
+    assert by_node["frasa-nomina"]["count"] == 1
+    assert by_node["urtfn"]["count"] == 1
+    assert by_node["urtfn"]["self_count"] == 1
+    assert by_node["gramatikal"]["self_count"] == 0
+    assert by_node["ejaan"]["path"] == "eror;ejaan"
+
+
+def test_error_summary_orders_nodes_by_count_descending(client, auth_headers, seeded_corpus):
+    response = client.get(
+        "/api/v1/error-summary", params={"corpus_ids": [seeded_corpus["error_corpus_id"]]}, headers=auth_headers,
+    )
+
+    counts = [row["count"] for row in response.json()["by_node"]]
+    assert counts == sorted(counts, reverse=True)
+
+
 def test_error_summary_requires_authentication(client, seeded_corpus):
     response = client.get("/api/v1/error-summary", params={"corpus_ids": [seeded_corpus["error_corpus_id"]]})
     assert response.status_code == 401

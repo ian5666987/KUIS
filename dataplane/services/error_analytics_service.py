@@ -16,6 +16,7 @@ from dataplane.repositories.base import (
     ErrorOccurrence,
     ErrorSummary,
     MatchMode,
+    MetadataFilter,
     SortDirection,
 )
 from dataplane.repositories.shared import resolve_document_ids
@@ -56,11 +57,16 @@ class ErrorAnalyticsService:
         direction: SortDirection,
         page: int,
         per_page: int,
+        metadata_filter: MetadataFilter | None = None,
     ) -> ErrorFrequencySearchResult:
         per_page = normalize_per_page(per_page)
         page = max(page, 1)
 
-        document_ids = await resolve_document_ids(self._session, corpus_ids)
+        # The secondary metadata filter is threaded in here rather than into the
+        # repository call: it narrows which documents are in scope, which is a
+        # request-shaping concern this layer already owns (see the module
+        # docstring), and leaves the repository interface untouched.
+        document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
         offset = (page - 1) * per_page
 
         result = await self._repository.frequency(
@@ -78,12 +84,17 @@ class ErrorAnalyticsService:
         window: int,
         page: int,
         per_page: int,
+        metadata_filter: MetadataFilter | None = None,
     ) -> EpicSearchResult:
         window = min(max(window, KWIC_WINDOW_MIN), KWIC_WINDOW_MAX)
         per_page = normalize_per_page(per_page)
         page = max(page, 1)
 
-        document_ids = await resolve_document_ids(self._session, corpus_ids)
+        # The secondary metadata filter is threaded in here rather than into the
+        # repository call: it narrows which documents are in scope, which is a
+        # request-shaping concern this layer already owns (see the module
+        # docstring), and leaves the repository interface untouched.
+        document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
         offset = (page - 1) * per_page
         filter = ErrorFilter(codes=codes or None)
 
@@ -92,6 +103,8 @@ class ErrorAnalyticsService:
 
         return EpicSearchResult(hits=hits, total=total, window=window, page=page, per_page=per_page)
 
-    async def summary(self, corpus_ids: list[int]) -> ErrorSummary:
-        document_ids = await resolve_document_ids(self._session, corpus_ids)
+    async def summary(
+        self, corpus_ids: list[int], metadata_filter: MetadataFilter | None = None
+    ) -> ErrorSummary:
+        document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
         return await self._repository.summary(document_ids)

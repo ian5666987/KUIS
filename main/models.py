@@ -283,6 +283,81 @@ class UserProfile(models.Model):
         return f"profile({self.user.username})"
 
 
+class DocumentMetadata(models.Model):
+    """One row per catalogue entry from metadata/*.csv — NOT one per Document
+    (docs/metadata-catalogue-plan.md).
+
+    The catalogue is the authority and is loaded independently of upload
+    order: all ~1,500 rows can exist before a single file is uploaded, and a
+    file can be uploaded before its catalogue row exists. So `document` is
+    nullable and resolved lazily from whichever side appears second — at
+    upload time by main/document_ingest.py::get_or_create_document, and in
+    reverse by the load_metadata_catalogue command.
+
+    The FK lives here rather than as a sidecar column on Document for two
+    reasons: Document's table stays untouched (nothing to re-mirror in
+    dataplane/models/tables.py's `document`), and OneToOneField enforces at
+    DB level that two catalogue entries can't claim the same Document —
+    which matters, because uniq_document_content_hash collapses
+    byte-identical uploads into a single row that several catalogue
+    filenames could otherwise point at.
+
+    Every analysis field is nullable: the filter's "(no value)" option has
+    to match an entry whose field is empty exactly as it matches a document
+    with no entry at all, and a LEFT OUTER JOIN makes NULL mean both.
+    """
+
+    # The CSV's "File name" verbatim (e.g. 'TUFS2023KOMSHI314.txt'), kept for
+    # reporting/traceability. Deliberately NOT unique — match_key is the real
+    # constraint, and two source rows differing only by extension would
+    # collide there first.
+    source_filename = models.CharField(max_length=200)
+    # normalize_match_key() of the above: basename, one extension stripped,
+    # lowercased. Stored rather than derived at query time so the join to a
+    # document is a plain indexed equality.
+    match_key = models.CharField(max_length=200, unique=True)
+    # SET_NULL, not CASCADE: documents are never hard-deleted today
+    # (docs/user-management-plan.md), and if one ever is, the catalogue row
+    # is source data that should outlive it.
+    document = models.OneToOneField(
+        Document,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='catalogue_entry',
+    )
+
+    university = models.CharField(max_length=50, null=True, blank=True)
+    year = models.IntegerField(null=True, blank=True)
+    grade = models.IntegerField(null=True, blank=True)
+    # topic / topic_en are two independent columns, never a normalized pair:
+    # the source mapping is not 1:1 (both "notable figure" and "public
+    # figure" appear for 'tokoh'; both 'tari' and 'tarian' for "dance").
+    topic = models.CharField(max_length=100, null=True, blank=True)
+    topic_en = models.CharField(max_length=100, null=True, blank=True)
+    # The catalogue's own word count — a third, independent notion of length
+    # alongside Document.token_count/token_count_corrected, which are
+    # computed by main/corpus_parsing.py's own tokenizer and legitimately
+    # disagree with this. Stored, not reconciled, and not filterable.
+    word_count = models.IntegerField(null=True, blank=True)
+    name_code = models.CharField(max_length=50, null=True, blank=True)
+
+    source_file = models.CharField(max_length=100)
+    imported_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'document metadata'
+        ordering = ['source_filename']
+        indexes = [
+            models.Index(fields=['university']),
+            models.Index(fields=['year', 'grade']),
+            models.Index(fields=['name_code']),
+        ]
+
+    def __str__(self):
+        return self.source_filename
+
+
 def build_tokens(document):
     """(Re)computes the Token rows for a document from its content, for both the
     original and corrected word streams. Does not save the document itself.

@@ -30,6 +30,13 @@ from collections import Counter
 # Django's own apps.populate() is a no-op once already ready.
 from worker.tasks.indexing import index_document
 from .document_ingest import decode_uploaded_file, get_or_create_document
+from .metadata_catalogue import (
+    FACET_FIELDS,
+    UNSET,
+    facet_values,
+    metadata_filter_q,
+    parse_facet_selection,
+)
 
 #For document uploading
 from .forms import CorpusForm, DocumentForm
@@ -439,7 +446,17 @@ def _get_selected_documents(request):
 
     # distinct() keeps a document that sits in several selected corpora from
     # being counted more than once
-    return Document.objects.filter(corpora__id__in=ids).distinct()
+    documents = Document.objects.filter(corpora__id__in=ids).distinct()
+
+    # The secondary metadata filter (docs/metadata-catalogue-plan.md). Applied
+    # here, not per view, for the same reason the corpus selection is: every
+    # analysis page and all five /export/ routes already resolve their
+    # documents through this one function, so they all pick the filter up
+    # without a line of their own. Unlike the corpus selection this lives only
+    # in the query string — three short facets won't bloat a URL the way a
+    # corpus id list would, and keeping it there makes a filtered analysis
+    # shareable.
+    return documents.filter(metadata_filter_q(parse_facet_selection(request.GET)))
 
 
 def _analysis_context(request, documents, feature=None):
@@ -465,8 +482,53 @@ def _analysis_context(request, documents, feature=None):
             totals['tokens_corrected'] if corrected else totals['tokens']
         ) or 0,
         'feature': feature,
-        'corrected': corrected
+        'corrected': corrected,
+        # Secondary metadata filter state for the context bar
+        # (docs/metadata-catalogue-plan.md). `metadata_facets` is a list
+        # rather than a dict so the template can iterate it without a custom
+        # filter, and each facet carries its own selected set so a checkbox
+        # can decide `checked` without a lookup tag.
+        'metadata_facets': _metadata_facet_context(request),
+        'metadata_unset_value': UNSET,
+        'metadata_name_code': request.GET.get('name_code', ''),
+        'metadata_filter_active': not parse_facet_selection(request.GET).is_empty,
     }
+
+
+# Human labels for the facet controls. Keyed by the field names in
+# main/metadata_catalogue.py::FACET_FIELDS — add a facet there and it shows up
+# here as its own field name until given a label.
+METADATA_FACET_LABELS = {
+    'university': 'University',
+    'year': 'Year',
+    'grade': 'Grade',
+}
+
+
+def _metadata_facet_context(request):
+    """Per-facet available values plus what's currently ticked, for the
+    context bar's metadata filter.
+
+    Values come from the catalogue rows that actually have a linked document
+    (see facet_values), so a ticked box can never produce a guaranteed-empty
+    result. Selections are read back as strings so the template compares them
+    to the rendered option values directly, without caring that year/grade are
+    integers in the database.
+    """
+    available = facet_values()
+    facets = []
+
+    for name in FACET_FIELDS:
+        raw = [v for v in request.GET.getlist(name) if v]
+        facets.append({
+            'name': name,
+            'label': METADATA_FACET_LABELS.get(name, name.replace('_', ' ').title()),
+            'values': [str(v) for v in available.get(name, [])],
+            'selected': {str(v) for v in raw},
+            'unset_selected': UNSET in raw,
+        })
+
+    return facets
 
 
 def _is_corrected_mode(request):

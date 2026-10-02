@@ -26,6 +26,7 @@ from dataplane.models.tables import (  # noqa: E402
     corpus_documents,
     document,
     document_error_freq,
+    document_metadata,
     document_ngram,
     document_word_freq,
     error_annotation,
@@ -49,6 +50,7 @@ SA_TABLES = {
     "error_taxonomy_node": error_taxonomy_node,
     "error_annotation": error_annotation,
     "document_error_freq": document_error_freq,
+    "document_metadata": document_metadata,
 }
 
 
@@ -64,6 +66,7 @@ SA_TABLES = {
         ("error_taxonomy_node", "main.models.ErrorTaxonomyNode", "main_errortaxonomynode"),
         ("error_annotation", "main.models.ErrorAnnotation", "main_errorannotation"),
         ("document_error_freq", "main.models.DocumentErrorFreq", "main_documenterrorfreq"),
+        ("document_metadata", "main.models.DocumentMetadata", "main_documentmetadata"),
     ],
 )
 def test_table_name_and_columns_match_django(sa_table, django_model_path, django_table_name):
