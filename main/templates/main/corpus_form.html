@@ -1,0 +1,101 @@
+{% extends 'main/base.html' %}
+
+{% block title %}{% if corpus %}Edit corpus{% else %}New corpus{% endif %}{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
+
+{% block content %}
+<div class="stack-lg">
+
+  <div class="page-head">
+    <p class="crumbs">
+      <a href="{% url 'corpus_dashboard' %}">Corpora</a><span>/</span>{% if corpus %}{{ corpus.name }}<span>/</span>Edit{% else %}New{% endif %}
+    </p>
+    <h1>{% if corpus %}Edit {{ corpus.name }}{% else %}New corpus{% endif %}</h1>
+    <p>Name the group, then attach files to it — existing ones, newly uploaded ones, or both.</p>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="stack">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="notice notice--error" role="alert">
+        <span class="notice__icon" aria-hidden="true">!</span>
+        <span>{{ form.non_field_errors|join:" " }}</span>
+      </div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel__body stack">
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.name.id_for_label }}">Corpus name</label>
+          {{ form.name }}
+          {% for error in form.name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.description.id_for_label }}">
+            Description <span class="text-muted" style="font-weight:400;">(optional)</span>
+          </label>
+          {{ form.description }}
+          <!-- <p class="field-hint">Shown in the corpus picker — say what this grouping represents.</p> -->
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:400;" for="{{ form.is_public.id_for_label }}">
+            {{ form.is_public }} Public
+          </label>
+          <p class="field-hint">{{ form.is_public.help_text }}</p>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head"><h2>Include existing files</h2></div>
+      <div class="panel__body">
+        <div class="picker__list" style="max-height:300px;">
+          {% for checkbox in form.documents %}
+            <label class="picker__row" style="grid-template-columns: 22px minmax(0,1fr);">
+              {{ checkbox.tag }}
+              <span class="picker__name" style="font-weight:400;">{{ checkbox.choice_label }}</span>
+            </label>
+          {% empty %}
+            <p class="picker__empty">No files uploaded yet — add some below.</p>
+          {% endfor %}
+        </div>
+        <!-- <p class="field-hint">
+          A file may belong to several corpora. When corpora overlap, shared files are
+          still counted only once in any analysis.
+        </p> -->
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head"><h2>Or upload new files</h2></div>
+      <div class="panel__body">
+        <div class="field-group">
+          <label class="field-label" for="files">XML or plain-text files</label>
+          {% comment %} Plain input rather than a Django FileField: Django only cleans one file per
+             FileField, so the view reads request.FILES.getlist('files') directly. {% endcomment %}
+          <input type="file" name="files" id="files" class="field" multiple>
+          <p class="field-hint">
+            Must be UTF-8 encoded. Each file becomes a document named after the file.
+            Corpus XML with <code>&lt;segment&gt;</code> annotations enables the corrected
+            text mode; other files are read as plain text.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn btn--primary">
+        {% if corpus %}Save changes{% else %}Create corpus{% endif %}
+      </button>
+      <a class="btn" href="{% if corpus %}{% url 'corpus_detail' corpus.id %}{% else %}{% url 'corpus_dashboard' %}{% endif %}">Cancel</a>
+      <span class="working" role="status">Uploading…</span>
+    </div>
+  </form>
+
+</div>
+{% endblock %}

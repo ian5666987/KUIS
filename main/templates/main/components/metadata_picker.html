@@ -1,0 +1,67 @@
+{% comment %} Secondary metadata filter (docs/metadata-catalogue-plan.md): narrows the
+   corpus selection by the catalogue fields imported from metadata/*.csv.
+
+   Sits inside the context bar's existing GET form, so it submits with the
+   corpus picker and the text-mode toggle — which is also why its param names
+   are in that form's `hidden_params exclude` list, or every value would be
+   submitted twice.
+
+   Each facet offers its own "(no value)" box. That option deliberately matches
+   two things at once: a file whose catalogue row leaves the field empty, AND a
+   file with no catalogue row at all — the two are indistinguishable to someone
+   reading the results, so they're one checkbox.
+
+   Rows are labels so the whole row is a click target, same as
+   corpus_picker.html. {% endcomment %}
+
+{% if metadata_facets %}
+  <div class="picker__meta">
+    <p class="picker__meta-head">
+      Metadata filter
+      <span class="text-sm text-muted">
+        — optional. Narrows the files above; leave blank to include everything.
+      </span>
+    </p>
+
+    <div class="picker__meta-grid">
+      {% for facet in metadata_facets %}
+        <fieldset class="picker__facet">
+          <legend class="context__label">{{ facet.label }}</legend>
+
+          {% for value in facet.values %}
+            <label class="picker__facet-row">
+              <input type="checkbox" name="{{ facet.name }}" value="{{ value }}"
+                     {% if value in facet.selected %}checked{% endif %}>
+              <span>{{ value }}</span>
+            </label>
+          {% empty %}
+            <p class="text-sm text-muted">No values loaded.</p>
+          {% endfor %}
+
+          {% comment %} Always offered, even when no value is loaded: "files with no
+             metadata" is a meaningful selection whether or not the catalogue
+             has been imported. {% endcomment %}
+          <label class="picker__facet-row picker__facet-row--none">
+            <input type="checkbox" name="{{ facet.name }}" value="{{ metadata_unset_value }}"
+                   {% if facet.unset_selected %}checked{% endif %}>
+            <span>(no value)</span>
+          </label>
+        </fieldset>
+      {% endfor %}
+
+      <fieldset class="picker__facet">
+        <legend class="context__label">Name code</legend>
+        {% comment %} A text box rather than a checkbox list: there are several hundred
+           name codes, which is a search problem, not a picking one. Matches on
+           prefix. {% endcomment %}
+        <label class="visually-hidden" for="meta-name-code">Name code starts with</label>
+        <input type="text" id="meta-name-code" class="field" name="name_code"
+               value="{{ metadata_name_code }}" placeholder="starts with…" autocomplete="off">
+      </fieldset>
+    </div>
+
+    <div class="picker__meta-actions">
+      <button type="submit" class="btn btn--sm">Apply filter</button>
+    </div>
+  </div>
+{% endif %}

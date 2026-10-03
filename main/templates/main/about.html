@@ -1,8 +1,46 @@
 {% extends 'main/base.html' %}
 
 {% block title %}About{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
 
 {% block content %}
-<h1>About Us</h1>
-<p>This is the about page. Add your company or project information here.</p>
+<div class="stack-lg">
+
+  <div class="page-head">
+    <h1>About KUIS</h1>
+    <p>
+      KUIS is a corpus-linguistics tool for an annotated Indonesian learner corpus.
+      Its source texts are XML files in which each observed error is marked as a
+      <code>&lt;segment&gt;</code> carrying a classification and, where one exists, a
+      correction.
+    </p>
+  </div>
+
+  <div class="panel">
+    <div class="panel__head"><h2>How analysis works</h2></div>
+    <div class="panel__body stack">
+      <p class="mt-0">
+        <strong>Corpora, not files.</strong> Every analysis runs over the corpora you
+        select, never over a single file. A file may sit in several corpora; when
+        selections overlap it is still counted once.
+      </p>
+      <p>
+        <strong>Two readings of the same text.</strong> <em>Original</em> counts the
+        learner text as written. <em>Corrected</em> substitutes the correction recorded
+        on each annotated segment. Files without annotations read the same in both modes.
+      </p>
+      <p>
+        <strong>Sequences stay within a file.</strong> Collocations, n-grams and
+        concordance windows are collected per file, so a sequence is never invented
+        across a boundary between two texts.
+      </p>
+      <p>
+        <strong>Counts are case-folded</strong> and tokenised on word characters.
+        Frequencies are also reported per million tokens, so corpora of different sizes
+        can be compared directly.
+      </p>
+    </div>
+  </div>
+
+</div>
 {% endblock %}

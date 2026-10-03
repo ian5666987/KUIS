@@ -1,0 +1,9 @@
+{% comment %} Empty / error state. Always says what happened, why, and what to do next —
+   the three are kept distinct so "no matches" never reads like a failure. {% endcomment %}
+<div class="state {% if variant == 'error' %}state--error{% endif %}" role="{% if variant == 'error' %}alert{% else %}status{% endif %}">
+  <p class="state__title">{{ title }}</p>
+  {% if body %}<p class="state__body">{{ body }}</p>{% endif %}
+  {% if action_url %}
+    <a class="btn {% if variant != 'error' %}btn--primary{% endif %}" href="{{ action_url }}" data-loading>{{ action_label }}</a>
+  {% endif %}
+</div>

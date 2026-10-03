@@ -1,0 +1,55 @@
+# One of two independent stacks for KUIS (KUIS-FE is the other, in its own
+# repo). Architecture plan §7 — house convention: nginx-gateway (deployed
+# separately, not part of this repo) is the only public entry point and
+# reaches each service by container name over the external `app-shared`
+# network. No app service publishes a host port.
+#
+# `app-shared` is declared external because in production it's created once
+# and shared across every stack on the VPS. For local dev, create it once
+# per machine: `docker network create app-shared`.
+
+networks:
+  app-shared:
+    external: true
+
+volumes:
+  kuis_postgres_data:
+
+services:
+  kuis-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - kuis_postgres_data:/var/lib/postgresql/data
+    networks: [app-shared]
+
+  kuis-redis:
+    image: redis:7-alpine
+    networks: [app-shared]
+
+  kuis-django:
+    build:
+      context: .
+      dockerfile: docker/django.Dockerfile
+    env_file: .env
+    depends_on: [kuis-postgres]
+    networks: [app-shared]
+
+  kuis-fastapi:
+    build:
+      context: .
+      dockerfile: docker/fastapi.Dockerfile
+    env_file: .env
+    depends_on: [kuis-postgres]
+    networks: [app-shared]
+
+  kuis-worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    env_file: .env
+    depends_on: [kuis-postgres, kuis-redis]
+    networks: [app-shared]

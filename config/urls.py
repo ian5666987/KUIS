@@ -24,12 +24,17 @@ from django.contrib.auth.views import LogoutView
 urlpatterns = [
     path('admin/', admin.site.urls),
     # Apparently, this is needed so that url patterns can be concatenated with whatever is in the main.urls
-    path('', include('main.urls')), 
+    path('', include('main.urls')),
     # This is needed for adding authentication to the website, giving us pages like:
     #  /accounts/login/, /accounts/logout/, /accounts/password_change/ (and more)
-    #path('accounts/', include('django.contrib.auth.urls')),  
+    #path('accounts/', include('django.contrib.auth.urls')),
 
     path('accounts/login/', CustomLoginView.as_view(), name='login'),
     path('accounts/logout/', LogoutView.as_view(), name='logout'),
+
+    # JSON API for KUIS-FE/FastAPI (architecture plan §3/§6) — purely
+    # additive, the session-cookie pages above are untouched. See
+    # main/api_urls.py for the routes themselves.
+    path('api/', include('main.api_urls')),
 ]
 

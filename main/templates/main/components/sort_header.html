@@ -1,0 +1,10 @@
+{% comment %} One sortable column header. Direction is carried by a glyph and aria-sort,
+   never by colour alone. {% endcomment %}
+{% load kuis %}
+{% aria_sort field as current %}
+<th scope="col" {% if numeric %}class="num"{% endif %} {% if current %}aria-sort="{{ current }}"{% endif %}>
+  <a class="sort-link" href="{% sort_url field default_dir %}" data-loading>
+    {{ label }}
+    <span class="sort-link__arrow" aria-hidden="true">{% if current == 'ascending' %}&#9650;{% elif current == 'descending' %}&#9660;{% else %}&#8597;{% endif %}</span>
+  </a>
+</th>

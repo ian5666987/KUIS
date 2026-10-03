@@ -1,9 +1,28 @@
 {% extends 'main/base.html' %}
 
 {% block title %}Profile{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
 
 {% block content %}
-<h1>Your Profile</h1>
-<p>Username: {{ user.username }}</p>
-<p>Email: {{ user.email }}</p>
+<div class="stack-lg">
+
+  <div class="page-head">
+    <h1>Profile</h1>
+  </div>
+
+  <div class="panel">
+    <div class="panel__body">
+      <table class="data" style="font-size:14px;">
+        <tbody>
+          <tr><th scope="row" style="width:40%;">Username</th><td>{{ user.username }}</td></tr>
+          <tr><th scope="row">Email</th><td>{{ user.email|default:"—" }}</td></tr>
+          <tr><th scope="row">Access level</th><td>{% if user.is_staff %}Administrator — can upload files and manage corpora{% else %}Researcher — can run every analysis{% endif %}</td></tr>
+          <tr><th scope="row">Files you uploaded</th><td class="num" style="text-align:left;">{{ document_count }}</td></tr>
+          <tr><th scope="row">Corpora you created</th><td class="num" style="text-align:left;">{{ corpus_count }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
 {% endblock %}

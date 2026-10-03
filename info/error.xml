@@ -1,0 +1,523 @@
+<?xml version='1.0' encoding='utf-8'?>
+<NETWORK VERSION='1.1'>
+  <ROOT>
+    <FEATURE>
+      <NAME>eror</NAME>
+      <STATE>active</STATE>
+    </FEATURE>
+  </ROOT>
+  <SYSTEMS>
+    <SYSTEM>
+      <NAME>TIPE-EROR</NAME>
+      <EC>eror</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>leksikal</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>gramatikal</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ejaan</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>lainnya</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>KATEGORI-LEKSIKAL</NAME>
+      <EC>leksikal</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>kata</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ungkapan</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-KATA</NAME>
+      <EC>kata</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>noms</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan nomina (kata dasarnya salah)
+&quot;Kasus smartphone-nya bagus.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>prons</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan pronomina
+&quot;Ketika kita sampai di sana, tokonya sudah tutup.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>pronrels</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan pronomina relatif
+&quot;Ini adalah pabrik yang ayah saya bekerja.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>gols</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan kata penggolong
+&quot;Di sana ada tiga buah kucing.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adjs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan adjektiva
+&quot;Adik saya tidak tinggi, dia rendah.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>preps</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan preposisi
+&quot;Saya membayar minuman atas kasir.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan verba (kata dasarnya salah)
+&quot;Kakak membuat pendaftaran.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbauxs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan kata kerja bantu
+&quot;Saya hendak tahu perbedaannya.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>negs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan kata negasi.
+&quot;Rambutnya pendek dan bukan keriting.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>dets</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan determina (kuantifikator, numeralia, dan artikula)
+&quot;Para binatang itu makan daging.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>advs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan adverbia
+&quot;Di sini saja ada satu meja.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>konjs</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan konjungsi
+&quot;Dan makanannya juga enak.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ktas</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Penggunaan kata atau istilah asing yang ada padanannya dalam bahasa Indonesia
+&quot;Saya lupa membawa passport.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ktinf</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Penggunaan kata/ungkapan informal/takbaku dalam teks formal atau sebaliknya
+&quot;Kamar saya kecil, tapi bersih.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ktvar</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Pilihan kata kurang bervariasi
+&quot;Itu terbuat dari kaca. Itu diterangi oleh lampu. Itu berkilau dan cantik.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-UNGKAPAN</NAME>
+      <EC>ungkapan</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>ukpa</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Frasa/ungkapan yang maknanya aneh/tidak biasa tetapi masih bisa dimengerti
+&quot;Saya makan udang dengan mata-mata masih.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ukps</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Frasa/ungkapan yang maknanya tidak jelas
+&quot;Saya bisa memasak dan tahu banyak alkohol sangat minuman.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>KATEGORI-GRAMATIKAL</NAME>
+      <EC>gramatikal</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>frasa-nomina</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>frasa-adjektiva</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>frasa-preposisi</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>frasa-verba</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>frasa-adverbia</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>konjungsi</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+        <FEATURE>
+          <NAME>kalimat</NAME>
+          <STATE>active</STATE>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-FRASA-NOMINA</NAME>
+      <EC>frasa-nomina</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>urtfn</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan urutan kata dalam frasa nomina
+&quot;Di ini saya kamar ada menarik foto banyak.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nomafx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan afiksasi nomina (kata dasarnya benar)
+&quot;Mereka fokus pada belajaran bahasa Indonesia.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nom0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan nomina
+&quot;Saya suka pelajaran Indonesia.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nomx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan nomina
+&quot;Saya mau bermain di sana sampai jam sore.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nomj</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Penjamakan nomina yang tidak tepat
+&quot;Dia membeli beberapa buku-buku.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nomr</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Reduplikasi nomina yang tidak tepat
+&quot;Di sana ada banyak rumah sakit-sakit.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>pron0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan pronomina
+&quot;Dia telah bersama kami sejak lahir. Dia adalah anggota keluarga.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>pronx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan pronomina
+&quot;Dia mengambil gitar dan dia memberikannya kepada saya.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nyaitu</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan penggunaan itu dan enklitik =nya
+&quot;Kalau mau makan, nasi itu di meja.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nya0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan enklitik =nya
+&quot;Saya ingin makan, tetapi nasi sudah habis.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>nyax</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan enklitik =nya
+&quot;Alatnya musiknya bagus sekali.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>yg0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan kata yang
+&quot;Ada empat patung emas berbaris.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ygx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan kata yang
+&quot;Prefektur Toyama yang menghasilkan ikan dalam jumlah besar di musim dingin.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>det0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan determina (kuantifikator, numeralia, atau artikula)
+&quot;Taman yang ada di Ibaraki adalah taman yang saya sukai.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>detx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan determina (kuantifikator, numeralia, atau artikula)
+&quot;Tinggi gedungnya itu enam ratus meter.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-FRASA-ADJEKTIVA</NAME>
+      <EC>frasa-adjektiva</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>urtfaj</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan urutan kata dalam frasa adjektiva
+&quot;Uangnya banyak sangat.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adjafx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan afiksasi adjektiva (kata dasarnya benar)
+&quot;Saya suka musiknya karena musiknya keanggunan.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adjj</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Reduplikasi atau penjamakan adjektiva yang tidak tepat
+&quot;Anjing itu kecil-kecil dan lucu.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adj0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan adjektiva
+&quot;Saya menabung cukup uang.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adjx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan adjektiva
+&quot;Saya suka tekstur lembut dan lembut makanan itu.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-FRASA-PREPOSISI</NAME>
+      <EC>frasa-preposisi</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>prep0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan preposisi
+&quot;Dia berkuliah Universitas Kanda.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>prepx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan preposisi
+&quot;Saya sangat ingin untuk makan soto.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-FRASA-VERBA</NAME>
+      <EC>frasa-verba</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>urtfv</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan urutan kata dalam frasa verba
+&quot;Dia makan juga tempe.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbpas</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan pemilihan bentuk verba aktif dan pasif
+&quot;Ada makanan yang sering makan orang Jepang.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbafx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan afiksasi verba (kata dasarnya benar)
+&quot;Saya akan deskripsi rumah saya.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrb0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan verba
+&quot;Cita-cita saya adalah orang kaya.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan verba
+&quot;Saya pergi berkunjung mengunjungi rumah paman.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbaux0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan kata kerja bantu
+&quot;Seandainya itu kamar saya, saya mengubah warna sofa di kamar itu.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>vrbauxx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan kata kerja bantu</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-FRASA-ADVERBIA</NAME>
+      <EC>frasa-adverbia</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>advafx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan afiksasi adverbia
+&quot;Setelah itu, kami berangkat ke sana secepat.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>adv0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan adverbia</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>advx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan adverbia
+&quot;Jika datang ke Jepang kadang, saya merekomendasikan Anda untuk mengunjungi tempat ini.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-KONJUNGSI</NAME>
+      <EC>konjungsi</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>konj0</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan konjungsi
+&quot;Di dalam kamar saya ada meja, kursi, lemari, tempat tidur.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>konjx</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kelebihan konjungsi
+&quot;Karena masakan itu dimasak ibu, sehingga rasanya enak.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-KALIMAT</NAME>
+      <EC>kalimat</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>kalsub</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kalimat tidak bersubjek
+&quot;Mudah untuk dimasak ketika Anda lapar.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>kalobj</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kalimat tidak berobjek
+&quot;Saya bisa menghabiskan di kamar saya.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>kalbel</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kalimat yang berbelit-belit
+&quot;Alasan cerita mengapa topik saya adalah “Belajar Bahasa Inggris di Jepang” karena orang Jepang menghabiskan banyak waktu dalam wajib belajar dan sambil menyinggung, mereka ragu mengapa mereka tidak pandai.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>kalpen</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Dua atau lebih kalimat yang seharusnya menjadi satu
+&quot;Mereka pergi ke kampus. Meskipun hujan deras.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>kalpan</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Satu kalimat yang seharusnya dipecah menjadi dua atau beberapa kalimat
+&quot;Di rumah saya ada serambi saya senang pergi ke situ.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-EJAAN</NAME>
+      <EC>ejaan</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>ejk</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan penggunaan huruf kapital atau huruf kecil
+&quot;Saya ingin belajar Bahasa indonesia lebih banyak.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ejtb</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Penggunaan tanda baca (titik, koma, dll.) yang salah atau kurang
+&quot;Makanan ini murah, manis dan enak.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ejsp</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan atau kelebihan spasi
+&quot;Dia tidak membeli    buku apapun.&quot;</GLOSS>
+        </FEATURE>
+        <FEATURE>
+          <NAME>ejhrf</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kekurangan, kelebihan, atau kesalahan penulisan huruf
+&quot;Saya purgi ke Prefekter Chiba.&quot;</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+    <SYSTEM>
+      <NAME>LABEL-LAINNYA</NAME>
+      <EC>lainnya</EC>
+      <FEATURES>
+        <FEATURE>
+          <NAME>lain</NAME>
+          <STATE>active</STATE>
+          <GLOSS>Kesalahan lainnya yang bukan kesalahan leksikal, kesalahan gramatikal, dan kesalahan ejaan</GLOSS>
+        </FEATURE>
+      </FEATURES>
+    </SYSTEM>
+
+  </SYSTEMS></NETWORK>

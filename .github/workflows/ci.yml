@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  django-tests:
+    runs-on: ubuntu-latest
+    env:
+      DB_ENGINE: django.db.backends.sqlite3
+      DB_NAME: ":memory:"
+      SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
+      # Phase 5 removed the post_save signal that used to tokenize a
+      # Document synchronously on save — main/tests.py's fixtures now call
+      # worker.tasks.indexing.index_document.delay(...) explicitly, which
+      # needs eager mode to run synchronously without a real Redis broker
+      # (confirmed: eager mode makes zero broker connections at all).
+      CELERY_TASK_ALWAYS_EAGER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      # docs/ONBOARDING.md §6: Django's test client adds 'testserver' to
+      # ALLOWED_HOSTS automatically, no override needed here.
+      # main/tests.py::JWTAuthTests covers the /api/auth/token/* endpoints
+      # (architecture plan §3) — obtain, refresh rotation + blacklist reuse
+      # rejection, and confirms session-cookie login stays unaffected.
+      - run: python manage.py test main
+
+  dataplane-tests:
+    runs-on: ubuntu-latest
+    # test_kwic_repository.py / test_kwic_router.py need a REAL Postgres —
+    # asyncpg has no sqlite equivalent, and the self-join SQL these tests
+    # exercise is exactly the kind of thing that only fails when actually
+    # executed (see dataplane/repositories/postgres/kwic_repository.py's
+    # docstring on the ordering bug this caught during development).
+    # DB_NAME must contain "test" — test_kwic_repository.py refuses to run
+    # (and would delete all Document/Corpus rows) otherwise.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kuis_dataplane_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: kuis_dataplane_test
+      SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
+      # seeded_corpus (conftest.py) calls index_document.delay(...) to
+      # populate Token/DocumentWordFreq/DocumentNgram — see django-tests'
+      # own CELERY_TASK_ALWAYS_EAGER comment above for why this needs no
+      # Redis service here.
+      CELERY_TASK_ALWAYS_EAGER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - run: python -c "from dataplane.main import app; assert app"
+      # Builds the schema Django owns (architecture plan §2) before the
+      # dataplane tests read/write it — test_kwic_repository.py's fixture
+      # also calls this itself, so this step is really just an early,
+      # clearer failure point if migrations themselves are broken.
+      - run: python manage.py migrate --noinput
+      - run: python -m pytest dataplane/tests -v
+
+  worker-import-check:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-test-key-not-for-production
+      JWT_SECRET: ci-test-jwt-secret-not-for-production
+      DB_ENGINE: django.db.backends.sqlite3
+      DB_NAME: ":memory:"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - run: python -c "from worker.celery_app import app; assert app"

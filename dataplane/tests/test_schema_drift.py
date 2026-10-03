@@ -1,0 +1,109 @@
+"""
+Guards against dataplane/models/tables.py silently drifting from Django's
+real schema (architecture plan §2) — Django's migrations are the only
+schema authority, but this file is a second, hand-written description of
+part of that schema, and nothing but this test keeps them in sync. A
+migration that renames/drops a column this file reads would otherwise fail
+at query time in production, not at review time.
+
+Doesn't need a live database — pure introspection of Django's model
+metadata (Model._meta), the same technique used to discover the real
+table/column names in the first place (see dataplane/models/tables.py's
+module docstring).
+"""
+
+import os
+
+import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+
+import pytest  # noqa: E402
+
+from dataplane.models.tables import (  # noqa: E402
+    corpus,
+    corpus_documents,
+    document,
+    document_error_freq,
+    document_metadata,
+    document_ngram,
+    document_word_freq,
+    error_annotation,
+    error_taxonomy_node,
+    token,
+    word_type,
+)
+
+
+def _django_columns(model) -> set[str]:
+    return {f.column for f in model._meta.get_fields() if getattr(f, "column", None)}
+
+
+SA_TABLES = {
+    "document": document,
+    "corpus": corpus,
+    "token": token,
+    "word_type": word_type,
+    "document_word_freq": document_word_freq,
+    "document_ngram": document_ngram,
+    "error_taxonomy_node": error_taxonomy_node,
+    "error_annotation": error_annotation,
+    "document_error_freq": document_error_freq,
+    "document_metadata": document_metadata,
+}
+
+
+@pytest.mark.parametrize(
+    "sa_table,django_model_path,django_table_name",
+    [
+        ("document", "main.models.Document", "main_document"),
+        ("corpus", "main.models.Corpus", "main_corpus"),
+        ("token", "main.models.Token", "main_token"),
+        ("word_type", "main.models.WordType", "main_wordtype"),
+        ("document_word_freq", "main.models.DocumentWordFreq", "main_documentwordfreq"),
+        ("document_ngram", "main.models.DocumentNgram", "main_documentngram"),
+        ("error_taxonomy_node", "main.models.ErrorTaxonomyNode", "main_errortaxonomynode"),
+        ("error_annotation", "main.models.ErrorAnnotation", "main_errorannotation"),
+        ("document_error_freq", "main.models.DocumentErrorFreq", "main_documenterrorfreq"),
+        ("document_metadata", "main.models.DocumentMetadata", "main_documentmetadata"),
+    ],
+)
+def test_table_name_and_columns_match_django(sa_table, django_model_path, django_table_name):
+    from main import models as main_models
+
+    model_name = django_model_path.rsplit(".", 1)[-1]
+    django_model = getattr(main_models, model_name)
+
+    assert django_model._meta.db_table == django_table_name
+
+    sa_table_obj = SA_TABLES[sa_table]
+    sa_columns = {c.name for c in sa_table_obj.columns}
+    django_columns = _django_columns(django_model)
+
+    missing_in_sqlalchemy = django_columns - sa_columns
+    extra_in_sqlalchemy = sa_columns - django_columns
+
+    assert not missing_in_sqlalchemy, (
+        f"Django's {model_name} has columns dataplane/models/tables.py's "
+        f"`{sa_table}` doesn't: {missing_in_sqlalchemy}"
+    )
+    assert not extra_in_sqlalchemy, (
+        f"dataplane/models/tables.py's `{sa_table}` has columns Django's "
+        f"{model_name} doesn't (renamed/dropped column?): {extra_in_sqlalchemy}"
+    )
+
+
+def test_m2m_through_table_matches_django():
+    from main.models import Corpus
+
+    through = Corpus.documents.through
+    assert through._meta.db_table == "main_corpus_documents"
+
+    sa_columns = {c.name for c in corpus_documents.columns}
+    django_columns = _django_columns(through)
+
+    assert sa_columns == django_columns, (
+        f"dataplane/models/tables.py's `corpus_documents` ({sa_columns}) doesn't "
+        f"match Django's M2M through table ({django_columns})"
+    )

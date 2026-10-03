@@ -1,0 +1,12 @@
+{% comment %} Honest reporting of a silent degradation: files that aren't corpus XML are
+   tokenized flat, so their "corrected" reading is identical to the original. {% endcomment %}
+{% if unstructured and corrected %}
+  <div class="notice notice--warning">
+    <span class="notice__icon" aria-hidden="true">!</span>
+    <span>
+      <strong>{{ unstructured|length }} file{{ unstructured|pluralize }} carry no segment annotations</strong>
+      ({% for title in unstructured %}{% if forloop.counter < 4 %}{{ title }}{% if not forloop.last and forloop.counter < 3 %}, {% endif %}{% endif %}{% endfor %}{% if unstructured|length > 3 %}, +{{ unstructured|length|add:"-3" }} more{% endif %}),
+      so their original text is counted unchanged in corrected mode.
+    </span>
+  </div>
+{% endif %}

@@ -1,0 +1,33 @@
+{% extends 'main/base.html' %}
+
+{% block title %}Delete corpus{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
+
+{% block content %}
+<div class="stack-lg">
+
+  <div class="page-head">
+    <p class="crumbs">
+      <a href="{% url 'corpus_dashboard' %}">Corpora</a><span>/</span>
+      <a href="{% url 'corpus_detail' corpus.id %}">{{ corpus.name }}</a><span>/</span>Delete
+    </p>
+    <h1>Delete “{{ corpus.name }}”?</h1>
+  </div>
+
+  <div class="notice notice--warning">
+    <span class="notice__icon" aria-hidden="true">!</span>
+    <span>
+      This removes the grouping only. Its {{ corpus.documents.count }} file{{ corpus.documents.count|pluralize }}
+      are kept and stay available to other corpora. Any analysis currently scoped to this
+      corpus will drop it from the selection.
+    </span>
+  </div>
+
+  <form method="post" class="row">
+    {% csrf_token %}
+    <button type="submit" class="btn btn--danger">Delete this corpus</button>
+    <a class="btn" href="{% url 'corpus_detail' corpus.id %}">Cancel</a>
+  </form>
+
+</div>
+{% endblock %}

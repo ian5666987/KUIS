@@ -10,22 +10,28 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
+
+import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-u4f8gnws5)yd*abyqka3*_^el(mo5y_)4*$jubf&tr#r!pyti#'
+SECRET_KEY = env('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
 
 # Application definition
@@ -37,11 +43,25 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.humanize', # thousands separators in result tables
     'main', #add this so that all in the folder "main" can be part of the apps
+
+    # JWT auth for the Next.js frontend + FastAPI data plane (architecture
+    # plan §3). The server-rendered pages above keep using Django's ordinary
+    # session-cookie login untouched — these apps are purely additive.
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Must come before CommonMiddleware per django-cors-headers' own docs —
+    # CommonMiddleware can redirect before CORS headers get a chance to be
+    # added, breaking preflight requests in ways that only show up in an
+    # actual browser (curl doesn't enforce or even send CORS preflight).
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -75,12 +95,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'corpus_db',
-        'USER': 'corpus_user',
-        'PASSWORD': 'changethistoyourownpassword',
-        'HOST': 'localhost',
-        'PORT': 5432,
+        'ENGINE': env('DB_ENGINE', default='django.db.backends.postgresql'),
+        'NAME': env('DB_NAME'),
+        'USER': env('DB_USER'),
+        'PASSWORD': env('DB_PASSWORD'),
+        'HOST': env('DB_HOST', default='localhost'),
+        'PORT': env('DB_PORT', default='5432'),
     }
 }
 
@@ -120,10 +140,62 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# Needed for `collectstatic` at Docker image build time (docker/django.Dockerfile);
+# harmless in local dev where `runserver` serves static files directly instead.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Sign-in accepts a username or the email on the account; the default backend
+# stays in the list so admin-created and superuser accounts keep working.
+AUTHENTICATION_BACKENDS = [
+    'main.auth_backends.UsernameOrEmailBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 # Add constants for login redirects
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'home'
+
+# Credentials used by the `seed` management command to bootstrap an admin
+# account and a plain (non-admin) account for local dev/testing. Values must
+# come from .env — never hardcode real credentials here.
+SEED_ADMIN_EMAIL = env('SEED_ADMIN_EMAIL', default='')
+SEED_ADMIN_PASSWORD = env('SEED_ADMIN_PASSWORD', default='')
+SEED_USER_EMAIL = env('SEED_USER_EMAIL', default='')
+SEED_USER_PASSWORD = env('SEED_USER_PASSWORD', default='')
+
+# --- JWT auth for Next.js / FastAPI (architecture plan §3) -----------------
+# TokenObtainPairView calls Django's normal authenticate(), which walks
+# AUTHENTICATION_BACKENDS above — UsernameOrEmailBackend works with zero
+# changes, login-by-username-or-email is inherited for free.
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'ALGORITHM': 'HS256',
+    # Deliberately separate from SECRET_KEY: rotating this should never force
+    # rotating Django's session-cookie signing key, and vice versa. FastAPI
+    # verifies tokens with this same value (dataplane/core/config.py) — the
+    # only secret shared between the two services in this repo.
+    'SIGNING_KEY': env('JWT_SECRET'),
+}
+
+# --- CORS for KUIS-FE (architecture plan §6, Phase 3) -----------------------
+# KUIS-FE calls this API directly from the browser (different origin — a
+# different port in dev, a different subdomain in prod), so without this the
+# browser silently blocks every request with no server-side error to find.
+# Comma-separated in .env; defaults to the local Next.js dev server so
+# `npm run dev` works out of the box.
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=['http://localhost:3000'])
+# Only the /api/ surface needs CORS at all — the server-rendered pages are
+# same-origin browser navigations, never fetched cross-origin.
+CORS_URLS_REGEX = r'^/api/.*$'
 
 # Add constants for contact, this is a test email, not the actual one.
 # The actual email requires to use server/protocol such as Gmail SMTP, Outlook, SendGrid

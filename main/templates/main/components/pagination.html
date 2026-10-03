@@ -1,0 +1,38 @@
+{% comment %} Pagination. Shows where you are in the whole result set, not just page links,
+   because "how many matches are there" is itself a finding. {% endcomment %}
+{% load kuis %}
+
+{% if page_obj %}
+<nav class="pager" aria-label="Results pages">
+  <span class="pager__status">
+    {% if page_obj.paginator.count %}
+      Showing <strong>{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong>
+      of <strong>{{ page_obj.paginator.count }}</strong> {{ unit|default:"results" }}
+    {% else %}
+      No {{ unit|default:"results" }}
+    {% endif %}
+  </span>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+    <span class="pager__pages">
+      {% if page_obj.has_previous %}
+        <a class="btn btn--sm" href="{% qs page=1 %}" data-loading>&laquo; First</a>
+        <a class="btn btn--sm" href="{% qs page=page_obj.previous_page_number %}" data-loading rel="prev">&lsaquo; Previous</a>
+      {% else %}
+        <span class="btn btn--sm" aria-disabled="true">&laquo; First</span>
+        <span class="btn btn--sm" aria-disabled="true">&lsaquo; Previous</span>
+      {% endif %}
+
+      <span class="pager__status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+      {% if page_obj.has_next %}
+        <a class="btn btn--sm" href="{% qs page=page_obj.next_page_number %}" data-loading rel="next">Next &rsaquo;</a>
+        <a class="btn btn--sm" href="{% qs page=page_obj.paginator.num_pages %}" data-loading>Last &raquo;</a>
+      {% else %}
+        <span class="btn btn--sm" aria-disabled="true">Next &rsaquo;</span>
+        <span class="btn btn--sm" aria-disabled="true">Last &raquo;</span>
+      {% endif %}
+    </span>
+  {% endif %}
+</nav>
+{% endif %}

@@ -1,24 +1,27 @@
 {% extends 'main/base.html' %}
 
+{% block title %}Collocations{% endblock %}
+
 {% block content %}
-<h2>Collocations: {{ document.title }}</h2>
+<div class="stack-lg">
 
-<table class="table">
-<tr>
-  <th>Word Pair</th>
-  <th>Count</th>
-</tr>
+  <div class="page-head">
+    <h1>Collocations</h1>
+    <!-- <p>
+      Counts for every pair of directly adjacent words. Pairs are collected within
+      each file, so a sequence is never invented across a file boundary.
+    </p> -->
+  </div>
 
-{% for pair, count in collocations %}
-<tr>
-  <td>{{ pair.0 }} {{ pair.1 }}</td>
-  <td>{{ count }}</td>
-</tr>
-{% endfor %}
-</table>
+  {% include 'main/components/context_bar.html' %}
+  {% include 'main/components/analysis_nav.html' %}
 
-<a href="{% url 'corpus_dashboard' %}" class="btn btn-outline-secondary mb-3">
-    ← Back to Corpus
-</a>
+  <div class="stack">
+    {% include 'main/components/mode_notice.html' %}
 
+    {% url 'collocations_export_csv' as export_url %}
+    {% include 'main/components/frequency_results.html' with item_label='Word pair' unit='pairs' export_url=export_url %}
+  </div>
+
+</div>
 {% endblock %}

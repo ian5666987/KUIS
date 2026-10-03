@@ -1,36 +1,62 @@
 {% extends 'main/base.html' %}
 
-{% block title %}Upload Document{% endblock %}
+{% block title %}Upload a file{% endblock %}
+{% block page_class %}page--narrow{% endblock %}
 
 {% block content %}
+<div class="stack-lg">
 
-<div class="row justify-content-center">
-  <div class="col-md-6">
-
-    <h2 class="mb-4">Upload Document</h2>
-
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %}
-
-      <div class="mb-3">
-        <label class="form-label">Title</label>
-        {{ form.title }}
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Paste Text</label>
-        {{ form.content }}
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Or Upload File (.txt)</label>
-        {{ form.file }}
-      </div>
-
-      <button class="btn btn-primary w-100">Upload</button>
-    </form>
-
+  <div class="page-head">
+    <p class="crumbs"><a href="{% url 'corpus_dashboard' %}">Corpora</a><span>/</span>Upload</p>
+    <h1>Upload a file</h1>
+    <p>
+      Add one file to the collection. It becomes analysable once you attach it to a
+      corpus — uploading alone does not include it in any analysis.
+    </p>
   </div>
-</div>
 
+  <form method="post" enctype="multipart/form-data" class="stack">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+      <div class="notice notice--error" role="alert">
+        <span class="notice__icon" aria-hidden="true">!</span>
+        <span>{{ form.non_field_errors|join:" " }}</span>
+      </div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel__body stack">
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.title.id_for_label }}">Title</label>
+          {{ form.title }}
+          {% for error in form.title.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.file.id_for_label }}">Upload a file</label>
+          {{ form.file }}
+          <p class="field-hint">UTF-8 encoded XML or plain text.</p>
+          {% for error in form.file.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="{{ form.content.id_for_label }}">Or paste the text</label>
+          {{ form.content }}
+          <p class="field-hint">Provide either a file or pasted text — whichever is easier.</p>
+          {% for error in form.content.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="submit" class="btn btn--primary">Upload</button>
+      <a class="btn" href="{% url 'corpus_dashboard' %}">Cancel</a>
+      <span class="working" role="status">Uploading…</span>
+    </div>
+  </form>
+
+</div>
 {% endblock %}
