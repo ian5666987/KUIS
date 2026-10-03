@@ -45,11 +45,11 @@ saya suka <segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' Correcti
 </document>"""
 
 # Same nested shape, but the outer segment's correction is spelled with a
-# lowercase attribute — real data uses both castings on sibling segments.
-# The token corrected-stream only ever reads capital 'Correction' (an
-# already-known, deliberately-unchanged quirk); ErrorAnnotation.correction_
-# text must still resolve it, since that's display text, not token
-# generation.
+# lowercase attribute — real exports use both castings, consistently within
+# a given file (info/OU 2023 Beta 201.xml and info/TUFS 2023 KOMA 209.xml are
+# all-lowercase; info/KUIS2022NAMI3.xml is all-capital). Both the token
+# corrected-stream and ErrorAnnotation.correction_text resolve either
+# spelling.
 LOWERCASE_CORRECTION_XML = """<document>
   <header><textfile>t</textfile><lang>indonesian</lang></header>
   <body>
@@ -1333,18 +1333,20 @@ class CorpusParsingTests(TestCase):
         self.assertEqual(original_words, ['saya', 'suka', 'goreng', 'nasi', 'sekali'])
         self.assertEqual(corrected_words, ['saya', 'suka', 'nasi', 'goreng', 'sekali'])
 
-    def test_corrected_stream_stays_capital_correction_only(self):
-        # Pins the pre-existing, deliberately-unchanged quirk (decision 1,
-        # docs/error-analytics-plan.md): a segment correction spelled with
-        # a lowercase attribute never reaches the token corrected-stream,
-        # even though extract_error_annotations resolves it fine below for
-        # display (correction_text is a separate concern from tokens).
+    def test_corrected_stream_reads_correction_case_insensitively(self):
+        # A lowercase `correction=` must be SUBSTITUTED into the corrected
+        # stream, not dropped. Reading only the capital spelling used to
+        # delete the error span and put nothing back ('sayang' alone here),
+        # which left a hole at every annotated error in the all-lowercase
+        # exports (info/OU 2023 Beta 201.xml, info/OU 2023 JIDA 201.xml,
+        # info/TUFS 2023 KOMA 209.xml) — the casing is per-file, so that hit
+        # every error in those documents, not the odd segment.
         from .corpus_parsing import extract_word_streams
 
         original_words, corrected_words = extract_word_streams(LOWERCASE_CORRECTION_XML)
 
         self.assertEqual(original_words, ['sayang', 'tuti'])
-        self.assertEqual(corrected_words, ['sayang'])
+        self.assertEqual(corrected_words, ['sayang', 'tuti', 'sayang'])
 
     def test_nested_annotation_span_is_contained_in_outer_span(self):
         from .corpus_parsing import extract_error_annotations

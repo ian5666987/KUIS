@@ -61,38 +61,85 @@ def _walk_body(body, original_words, corrected_words, annotations=None):
             'comment': segment.get('comment', ''),
         })
 
-    def walk_segment(node):
-        """Inside a <segment>: text (including nested segments' text) feeds
-        the ORIGINAL stream only — mirrors the pre-fix rule that a
-        segment's own text never touches the corrected stream, just
-        extended to actually reach nested content instead of silently
-        dropping it. The corrected stream is fed exclusively by the
-        OUTERMOST segment's own Correction value (added once, by `walk`
-        below) — a nested segment's own Correction is still captured on its
-        ErrorAnnotation row for display, but the outer segment's correction
-        already stands in for the whole span in the corrected reading, so
-        it is not added again here."""
-        add_original(node.text)
+    def walk_segment(node, also_corrected=False):
+        """Inside a <segment>: text (including nested segments' text) always
+        feeds the ORIGINAL stream. It feeds the corrected stream too only
+        when `also_corrected` — i.e. when the OUTERMOST segment of this span
+        proposes no correction at all, so the text stands as written (see
+        `walk`). Otherwise the corrected stream is fed exclusively by that
+        outermost segment's own correction value, added once by `walk`: a
+        nested segment's own correction is still captured on its
+        ErrorAnnotation row for display, but the outer correction already
+        stands in for the whole span in the corrected reading, so it is not
+        added again here.
+
+        `also_corrected` propagates into nested segments rather than being
+        re-decided per level, keeping that outermost-wins rule intact: a
+        correction nested inside a correction-less outer segment is not
+        applied to the corrected stream. No sample document exercises that
+        shape (no nested segment in info/ carries a correction of either
+        casing), so this stays the conservative reading of the existing
+        rule.
+        """
+        emit = add_both if also_corrected else add_original
+        emit(node.text)
         for child in node:
             if child.tag == 'segment':
                 start = len(original_words)
-                walk_segment(child)
+                walk_segment(child, also_corrected)
                 record_annotation(child, start, len(original_words))
             else:
-                add_original(''.join(child.itertext()))
-            add_original(child.tail)
+                emit(''.join(child.itertext()))
+            emit(child.tail)
 
     def walk(node):
         add_both(node.text)
         for child in node:
             if child.tag == 'segment':
+                # Presence, not truthiness: an ABSENT correction attribute
+                # and an explicit `correction=''` mean different things, and
+                # `.get(..., '')` used to collapse them into the same thing
+                # (delete the span). An explicit empty value is a deliberate
+                # deletion — info/KUIS2022NAMI3.xml marks two redundant
+                # conjunctions that way — whereas no attribute at all means
+                # the error was flagged without a correction being proposed,
+                # and the text must stand as written in the corrected
+                # reading. Conflating them silently deleted every
+                # correction-less error span from the corrected stream: ~40
+                # words per document in info/OU 2023 Beta 201.xml, info/OU
+                # 2023 JIDA 201.xml and info/TUFS 2023 KOMA 209.xml, where
+                # most segments carry no correction. It never showed on
+                # info/KUIS2022NAMI3.xml or info/TUFS 2022 Results.xml,
+                # whose every segment has one.
+                correction = child.get('Correction')
+                if correction is None:
+                    correction = child.get('correction')
+
                 start = len(original_words)
-                walk_segment(child)
+                walk_segment(child, also_corrected=correction is None)
                 record_annotation(child, start, len(original_words))
-                # UNCHANGED: capital 'Correction' only, top-level segments
-                # only — the one rule already verified pre-fix, kept
-                # exactly as-is (docs/error-analytics-plan.md).
-                corrected_words.extend(_tokenize(child.get('Correction', '')))
+                # Read the correction case-insensitively, exactly as
+                # record_annotation does above: real exports spell this
+                # attribute both ways, and consistently *within* a file —
+                # info/KUIS2022NAMI3.xml and info/TUFS 2022 Results.xml use
+                # `Correction=` on every segment, while info/OU 2023 Beta
+                # 201.xml, info/OU 2023 JIDA 201.xml and info/TUFS 2023 KOMA
+                # 209.xml use `correction=` on every segment. Reading only
+                # the capital spelling (the long-standing quirk this
+                # replaces) removed a lowercase-cased document's error span
+                # from the corrected stream without substituting anything
+                # back, so its corrected reading came out with a hole at
+                # every annotated error rather than the corrected wording —
+                # whole documents, not stray segments, since the casing is
+                # per-export.
+                #
+                # Still the OUTERMOST segment's correction only: it stands in
+                # for its entire span, nested segments included (see
+                # walk_segment's docstring). No nested segment in the sample
+                # data carries a correction of either casing, so that rule is
+                # untouched here.
+                if correction is not None:
+                    corrected_words.extend(_tokenize(correction))
             else:
                 walk(child)
             add_both(child.tail)
@@ -142,8 +189,9 @@ def extract_word_streams(content):
 
     For well-formed corpus XML with a <body>, plain text contributes equally to both
     streams, and each <segment> contributes its inner text (nested segments included)
-    to the original stream and its Correction attribute (if non-empty) to the
-    corrected stream. Falls back to flat word tokenization of the raw content
+    to the original stream and its correction attribute (if non-empty) to the
+    corrected stream — spelled `Correction=` or `correction=`, both accepted,
+    since real exports use either. Falls back to flat word tokenization of the raw content
     (identical for both streams) when the content isn't parseable XML with a <body>
     element.
     """
