@@ -332,13 +332,26 @@ class MetadataFilter:
     universities: tuple[str, ...] = ()
     years: tuple[int, ...] = ()
     grades: tuple[int, ...] = ()
+    # Author facets (docs/author-metadata-plan.md). `genders` reads a column
+    # one hop past document_metadata; `mother_tongues` is multi-valued and is
+    # answered with EXISTS against the child table — see
+    # repositories/shared.py. Both compose exactly like the facets above: OR
+    # within, AND across.
+    genders: tuple[str, ...] = ()
+    mother_tongues: tuple[str, ...] = ()
     unset: frozenset[str] = frozenset()
     name_code: str = ""
 
     @property
     def is_empty(self) -> bool:
         return not (
-            self.universities or self.years or self.grades or self.unset or self.name_code
+            self.universities
+            or self.years
+            or self.grades
+            or self.genders
+            or self.mother_tongues
+            or self.unset
+            or self.name_code
         )
 
 
@@ -355,6 +368,12 @@ class MetadataFacets:
     universities: list[str]
     years: list[int]
     grades: list[int]
+    genders: list[str]
+    # Only tongues whose speakers have an uploaded file, same rule as every
+    # other facet here: Arabic and Korean are really recorded in the surveys
+    # but have no catalogued essays, so offering them would be a
+    # guaranteed-empty filter.
+    mother_tongues: list[str]
 
 
 class MetadataRepository(ABC):

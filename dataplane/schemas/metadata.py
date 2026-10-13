@@ -43,6 +43,14 @@ class MetadataFilterParams:
     university: Annotated[list[str] | None, Query()] = None
     year: Annotated[list[str] | None, Query()] = None
     grade: Annotated[list[str] | None, Query()] = None
+    # Author facets (docs/author-metadata-plan.md). Param names match
+    # main/metadata_catalogue.py's FACET_FIELDS, keeping one vocabulary across
+    # both surfaces. mother_tongue is singular like the others even though a
+    # person can have several: the param names the facet, and repeating it is
+    # how multiple values arrive — ?mother_tongue=Japanese&mother_tongue=Malay
+    # asks for either.
+    gender: Annotated[list[str] | None, Query()] = None
+    mother_tongue: Annotated[list[str] | None, Query()] = None
     name_code: Annotated[str | None, Query()] = None
 
     def to_filter(self) -> MetadataFilter:
@@ -66,6 +74,8 @@ class MetadataFilterParams:
         universities = split("university", self.university)
         raw_years = split("year", self.year)
         raw_grades = split("grade", self.grade)
+        genders = split("gender", self.gender)
+        mother_tongues = split("mother_tongue", self.mother_tongue)
 
         def as_ints(values):
             out = []
@@ -80,6 +90,8 @@ class MetadataFilterParams:
             universities=tuple(universities),
             years=as_ints(raw_years),
             grades=as_ints(raw_grades),
+            genders=tuple(genders),
+            mother_tongues=tuple(mother_tongues),
             unset=frozenset(unset),
             name_code=(self.name_code or "").strip(),
         )
@@ -94,4 +106,6 @@ class MetadataFacetsResponse(BaseModel):
     universities: list[str]
     years: list[int]
     grades: list[int]
+    genders: list[str]
+    mother_tongues: list[str]
     unset_value: str = METADATA_UNSET

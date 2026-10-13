@@ -31,6 +31,18 @@ class DocumentMetadataSerializer(serializers.ModelSerializer):
     no metadata, and why a metadata filter excludes them.
     """
 
+    # Author facets (docs/author-metadata-plan.md), flattened rather than
+    # nested: these are the two author fields the filter exposes, and a nested
+    # author object would invite the frontend to read survey columns that are
+    # deliberately NOT filterable yet (age, duration, difficulty all vary
+    # between a writer's surveys).
+    #
+    # Both resolve to None when the writer wasn't surveyed, which is the
+    # normal case for four of the seven universities — the same None the
+    # filter's "(no value)" option selects.
+    gender = serializers.CharField(source="author.gender", read_only=True, default=None)
+    mother_tongues = serializers.SerializerMethodField()
+
     class Meta:
         model = DocumentMetadata
         fields = [
@@ -42,8 +54,18 @@ class DocumentMetadataSerializer(serializers.ModelSerializer):
             "topic_en",
             "word_count",
             "name_code",
+            "gender",
+            "mother_tongues",
         ]
         read_only_fields = fields
+
+    def get_mother_tongues(self, entry):
+        """A list, because a writer can have more than one — plural field name
+        and plural value, unlike the `mother_tongue` filter param, which names
+        the facet being filtered rather than the writer's set."""
+        if entry.author_id is None:
+            return []
+        return [tongue.tongue for tongue in entry.author.mother_tongues.all()]
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -85,8 +107,12 @@ class DocumentListView(ListAPIView):
         queryset = (
             Document.objects.annotate(corpus_count=Count("corpora", distinct=True))
             # One query for the whole page's catalogue entries rather than one
-            # per row — the serializer reads the reverse one-to-one.
-            .select_related("catalogue_entry")
+            # per row — the serializer reads the reverse one-to-one. The author
+            # rides along on the same join; its mother tongues are a
+            # to-many, so they take one extra query for the page rather than
+            # one per row.
+            .select_related("catalogue_entry__author")
+            .prefetch_related("catalogue_entry__author__mother_tongues")
             .order_by("-uploaded_at")
         )
 
@@ -151,7 +177,8 @@ class DocumentUploadView(APIView):
             # just linked (or null when the catalogue doesn't cover this file),
             # so the uploader can see immediately whether it will be reachable
             # by a metadata filter.
-            .select_related("catalogue_entry")
+            .select_related("catalogue_entry__author")
+            .prefetch_related("catalogue_entry__author__mother_tongues")
             .get(id=doc.id)
         ).data
         output["duplicate"] = not created

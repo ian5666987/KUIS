@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath, PurePath
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 
-from .models import Document, DocumentMetadata
+from .models import AuthorMotherTongue, Document, DocumentMetadata
 
 # The sentinel a filter uses to ask for "documents with no value for this
 # facet" — which means BOTH a catalogue entry whose field is empty and a
@@ -49,7 +49,31 @@ UNSET = '__none__'
 # distinct values need a searchable multi-select, not a checkbox list (see
 # the plan's "Explicitly deferred"). Adding one later is a line here plus a
 # UI control — nothing else in the filter path is field-specific.
-FACET_FIELDS = ('university', 'year', 'grade')
+FACET_FIELDS = ('university', 'year', 'grade', 'gender', 'mother_tongue')
+
+# Facet name -> the ORM path to filter on, relative to Document.
+#
+# Needed because the facets no longer all live on one table: university/year/
+# grade are columns of the catalogue row, while gender is one hop further out
+# on the author (docs/author-metadata-plan.md). Traversing a nullable FK with
+# __isnull=True promotes BOTH hops to LEFT OUTER, so the "(no value)" option
+# keeps meaning all of "field empty", "no author" and "no catalogue row at
+# all" — which is exactly what it has to mean when four of the seven
+# universities have no survey data.
+#
+# mother_tongue is absent on purpose: it is multi-valued and gets its own
+# EXISTS branch in _facet_q, the same way name_code is special-cased below.
+FACET_ORM_PATHS = {
+    'university': 'catalogue_entry__university',
+    'year': 'catalogue_entry__year',
+    'grade': 'catalogue_entry__grade',
+    'gender': 'catalogue_entry__author__gender',
+}
+
+# The multi-valued facets. A person can have several mother tongues, so
+# "mother tongue is Japanese or Malay" is a membership test, not a column
+# comparison.
+MULTI_VALUE_FACETS = frozenset({'mother_tongue'})
 
 # Which of the above are integer columns: `= ''` is a valid "empty" test for
 # a varchar and a type error for an integer in Postgres, so the two kinds of
@@ -387,15 +411,39 @@ def facet_values():
     """
     linked = DocumentMetadata.objects.filter(document__isnull=False)
 
+    # Catalogue-row and author columns alike: the ORM path already encodes
+    # which table a facet lives on, just relative to DocumentMetadata here
+    # rather than to Document.
+    local_paths = {
+        name: path.removeprefix('catalogue_entry__')
+        for name, path in FACET_ORM_PATHS.items()
+    }
+
     values = {}
     for name in FACET_FIELDS:
+        if name in MULTI_VALUE_FACETS:
+            continue
+        path = local_paths[name]
         found = (
-            linked.exclude(**{f'{name}__isnull': True})
-            .order_by(name)
-            .values_list(name, flat=True)
+            linked.exclude(**{f'{path}__isnull': True})
+            .order_by(path)
+            .values_list(path, flat=True)
             .distinct()
         )
         values[name] = [v for v in found if v != '']
+
+    # Mother tongue comes off the child table instead. Restricted to authors
+    # who actually have an uploaded file, same rule as above — which is what
+    # keeps Arabic and Korean out of the control: both are real recorded
+    # tongues whose speakers have no catalogued essays, so offering them
+    # would be a guaranteed-empty result.
+    values['mother_tongue'] = list(
+        AuthorMotherTongue.objects
+        .filter(author__documents__document__isnull=False)
+        .order_by('tongue')
+        .values_list('tongue', flat=True)
+        .distinct()
+    )
 
     return values
 
@@ -463,21 +511,61 @@ def _facet_q(name, values, include_unset, numeric):
     filter: the caller can tell "no predicate for this facet" apart from "a
     predicate that happens to match everything".
     """
+    if name in MULTI_VALUE_FACETS:
+        return _multi_value_facet_q(name, values, include_unset)
+
+    path = FACET_ORM_PATHS[name]
+
     clause = None
     if values:
-        clause = Q(**{f'catalogue_entry__{name}__in': values})
+        clause = Q(**{f'{path}__in': values})
 
     if include_unset:
-        # `__isnull=True` on a reverse one-to-one promotes the join to LEFT
-        # OUTER, so this single term covers BOTH required cases: a catalogue
-        # entry whose field is empty, and a document with no entry at all.
-        # That equivalence is the whole reason this feature needs no
-        # special-casing per surface — see the plan's LEFT-JOIN decision.
-        unset_clause = Q(**{f'catalogue_entry__{name}__isnull': True})
+        # `__isnull=True` on a reverse one-to-one — or, for an author facet,
+        # across that plus a nullable FK — promotes every hop to LEFT OUTER,
+        # so this single term covers ALL the required cases: a catalogue entry
+        # whose field is empty, an entry with no author, and a document with
+        # no entry at all. That equivalence is the whole reason this feature
+        # needs no special-casing per surface — see the plan's LEFT-JOIN
+        # decision.
+        unset_clause = Q(**{f'{path}__isnull': True})
         if not numeric:
             # '' is a legitimate "empty" only for a varchar column; comparing
             # an integer column to '' is a type error in Postgres.
-            unset_clause |= Q(**{f'catalogue_entry__{name}': ''})
+            unset_clause |= Q(**{path: ''})
+        clause = unset_clause if clause is None else (clause | unset_clause)
+
+    return clause
+
+
+def _multi_value_facet_q(name, values, include_unset):
+    """One multi-valued facet's Q — currently just mother_tongue.
+
+    EXISTS rather than a join through the child table, for a concrete reason:
+    a join multiplies rows for anyone with two tongues, and
+    main/views.py::_analysis_context sums token_count over this same queryset,
+    so a two-tongue document would contribute its tokens twice. The
+    .distinct() in _get_selected_documents dedupes ROWS, not an aggregate over
+    them. EXISTS asks the membership question without touching cardinality.
+
+    NOT EXISTS is also the complete "(no value)" term on its own: the subquery
+    correlates on catalogue_entry__author_id, which is NULL both when the
+    document has no catalogue row and when its author is unresolved, and an
+    author with no tongue rows matches nothing either way. One predicate,
+    all three unknown cases.
+
+    Composition is unchanged from every other facet: OR within, AND across.
+    """
+    tongues = AuthorMotherTongue.objects.filter(
+        author_id=OuterRef('catalogue_entry__author_id'),
+    )
+
+    clause = None
+    if values:
+        clause = Q(Exists(tongues.filter(tongue__in=values)))
+
+    if include_unset:
+        unset_clause = Q(~Exists(tongues))
         clause = unset_clause if clause is None else (clause | unset_clause)
 
     return clause

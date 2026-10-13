@@ -36,4 +36,6 @@ async def get_metadata_facets(
         universities=facets.universities,
         years=facets.years,
         grades=facets.grades,
+        genders=facets.genders,
+        mother_tongues=facets.mother_tongues,
     )

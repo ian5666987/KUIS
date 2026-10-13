@@ -2,6 +2,10 @@
 
 **Status: ✅ Shipped.** Backend (Django + dataplane) and KUIS-FE. `metadata/*.csv` is now tracked; migration `0014` is not yet applied to `corpus_db` and the catalogue is not yet loaded there — see **Loading** below for the sequence. Matching rules: `docs/metadata-matching.md`.
 
+> **`metadata/` now holds two different schemas in two directories.** `metadata/*.csv` is this catalogue — one row per **file**, keyed on `File name`. `metadata/authors/*.csv` is person-level survey data — one row per **person per survey occasion**, keyed on `(University, Name code)` — covered by `docs/author-metadata-plan.md`, which also extends this filter with the `gender` and `mother_tongue` facets.
+>
+> The split is load-bearing, not cosmetic: `_resolve_paths` globs `metadata/*.csv` **non-recursively** and `_load_one` hard-fails any CSV without a `File name` column, so an author CSV sitting in `metadata/` aborts the whole catalogue import before anything is read (`KUIS.csv` sorts first). Guarded by `main/tests.py::test_only_catalogue_schema_csvs_live_directly_in_metadata`.
+
 ## What this is
 
 Every analysis feature scoped on one axis: which corpora are selected. There was no way to ask "frequency over grade-3 writing only" or "KWIC across TUFS documents" — the information existed, as two CSV catalogues totalling 1,559 rows (1,557 distinct filenames), but lived outside the database.

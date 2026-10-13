@@ -14,6 +14,7 @@ from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.messages import get_messages
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.urls import reverse
 
@@ -2208,6 +2209,64 @@ class LoadMetadataCatalogueCommandTests(TestCase):
         # Nothing should have been skipped as unusable.
         self.assertNotIn('unusable File name', output)
 
+    def test_only_catalogue_schema_csvs_live_directly_in_metadata(self):
+        """metadata/ must hold ONLY catalogue-schema CSVs.
+
+        _resolve_paths globs metadata/*.csv and _load_one hard-fails any file
+        without a `file name` header, so one stray CSV of a different schema
+        takes the whole import down — including the two real catalogue files.
+        That is exactly what happened when the person-level author CSVs
+        (KUIS/OU/TUFS.csv) were first dropped in here: 'KUIS.csv' sorts first,
+        so a bare `load_metadata_catalogue` raised CommandError and imported
+        nothing. They live in metadata/authors/ now, and the glob is
+        non-recursive, which is what keeps the two schemas apart.
+
+        Asserted over the real directory rather than a fixture because the
+        invariant being protected is the repo's own data layout.
+        """
+        import csv as csv_module
+
+        from main.management.commands.load_metadata_catalogue import METADATA_DIR
+        from main.metadata_catalogue import REQUIRED_CSV_HEADERS, normalize_header
+
+        found = sorted(METADATA_DIR.glob('*.csv'))
+        self.assertTrue(found, f'No catalogue CSVs in {METADATA_DIR}')
+
+        for path in found:
+            with open(path, newline='', encoding='utf-8-sig') as handle:
+                headers = {
+                    normalize_header(h)
+                    for h in (csv_module.DictReader(handle).fieldnames or [])
+                }
+            for required in REQUIRED_CSV_HEADERS:
+                self.assertIn(
+                    required,
+                    headers,
+                    f"{path.name} sits in metadata/ but has no '{required}' column, "
+                    f"so it will abort the whole catalogue import. Move it to a "
+                    f"subdirectory (see metadata/authors/).",
+                )
+
+    def test_author_csvs_in_the_subdirectory_are_not_picked_up(self):
+        """The non-recursive glob is load-bearing: metadata/authors/*.csv is a
+        different schema entirely and must stay invisible to this command."""
+        from main.management.commands.load_metadata_catalogue import METADATA_DIR
+
+        authors_dir = METADATA_DIR / 'authors'
+        if not authors_dir.is_dir():
+            self.skipTest('metadata/authors/ not present')
+
+        self.assertTrue(
+            sorted(authors_dir.glob('*.csv')),
+            'metadata/authors/ exists but holds no CSVs — did they move again?',
+        )
+        globbed = {p.name for p in METADATA_DIR.glob('*.csv')}
+        self.assertEqual(
+            globbed & {p.name for p in authors_dir.glob('*.csv')},
+            set(),
+            'An author CSV is reachable from the catalogue glob.',
+        )
+
 
 class MetadataFilterViewTests(ExplorerTestCase):
     """The secondary metadata filter on the Django analysis surface — applied
@@ -2383,7 +2442,7 @@ class MetadataFilterViewTests(ExplorerTestCase):
         start = html.index('<form method="get" class="context"')
         context_form = html[start:html.index('</form>', start)]
 
-        for facet in ['university', 'year', 'grade', 'name_code']:
+        for facet in ['university', 'year', 'grade', 'gender', 'mother_tongue', 'name_code']:
             with self.subTest(facet=facet):
                 self.assertNotIn(f'<input type="hidden" name="{facet}"', context_form)
                 # ...while the real control for it is present.
@@ -2419,6 +2478,696 @@ class MetadataFilterViewTests(ExplorerTestCase):
         self.assertEqual(values['university'], ['TUFS'])
         self.assertEqual(values['year'], [2023])
         self.assertEqual(values['grade'], [3])
+
+
+# Person-level survey CSV, in the real 20-column shape. CRLF and a trailing
+# column with no newline, like the real exports. Deliberately includes:
+#   * two survey rows for one person (ACHI), with age and duration CHANGING
+#     between them — the ambiguity that keeps those two out of the facets;
+#   * a gender conflict (KONA), the one real error in the source;
+#   * differing mother-tongue SETS for one person (NEGSEI), resolved by union;
+#   * a multi-tongue cell with the ideographic comma the source actually uses;
+#   * 'Osaka' for the university the catalogue spells 'OU';
+#   * a duration in Japanese notation and an ambiguous '2、3 year(s)';
+#   * a date with no year.
+AUTHOR_CSV_HEADER = (
+    'Name code,Date,University,Age,Gender,Grade,Major,Mother tongues,'
+    'Duration of learning Indonesian,Other foreign language (1),'
+    'Duration of learning other FL (1),Other foreign language (2),'
+    'Duration of learning other FL (2),'
+    'Indonesian Language Proficiency Test Level,Test Month and Year,'
+    'Place of staying in Indonesia,Duration of staying in Indonesia,'
+    'Difficulty level of writing essays in Indonesian (1=very easy~5=very difficult),'
+    'Reasons,Reasons (translated into English)'
+)
+
+AUTHOR_CSV = '\r\n'.join([
+    AUTHOR_CSV_HEADER,
+    'ACHI,2023/5/16,KUIS,18,Female,1,Indonesian,Japanese,1 month(s),English,'
+    '12 year(s),,,,,,,3,むずかしい,difficult',
+    'ACHI,2024/1/10,KUIS,19,Female,1,Indonesian,Japanese,9 month(s),English,'
+    '13 year(s),,,,,,,4,まだむずかしい,still difficult',
+    'KONA,2023/5/16,KUIS,18,Female,1,Indonesian,Japanese,1 month(s),,,,,,,,,3,,',
+    'KONA,2024/1/10,KUIS,19,Male,1,Indonesian,Japanese,9 month(s),,,,,,,,,3,,',
+    'NEGSEI,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese、Malay,1 year(s),'
+    'English,8 year(s),,,,,,,3,,',
+    'NEGSEI,2024/1/18,TUFS,20,Male,2,Indonesian,Malay,1 year(s)8 month(s),'
+    'English,9 year(s),,,,,,,3,,',
+    'CHID,2023/5/11,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),English,'
+    '2、3 year(s),,,,,,,4,,',
+    'HOMTAK,2023/5/11,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),Korean,'
+    '2カ月,,,,,,,4,,',
+    'MADA,11/27,Osaka,21,Male,2,Indonesian,Japanese,19 month(s),English,'
+    '6 year(s),,,,,Yogyakarta,1 week(s),2,かんたん,simple',
+])
+
+
+class LoadAuthorMetadataCommandTests(TestCase):
+    """main/management/commands/load_author_metadata.py and
+    main/author_metadata.py (docs/author-metadata-plan.md)."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _Path
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmpdir = _Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.csv_path = _write_csv(self.tmpdir, 'KUIS.csv', AUTHOR_CSV)
+
+    def _run(self, *args, expect_error=True):
+        """Runs the command. The fixture contains a deliberate gender conflict,
+        so a CommandError is the EXPECTED outcome — the import still completes,
+        the non-zero exit is there so CI and deploy scripts notice bad source
+        data. Pass expect_error=False for a fixture with no errors.
+        """
+        out = StringIO()
+        if expect_error:
+            with self.assertRaises(CommandError):
+                call_command('load_author_metadata', '--file', str(self.csv_path),
+                             *args, stdout=out)
+        else:
+            call_command('load_author_metadata', '--file', str(self.csv_path),
+                         *args, stdout=out)
+        return out.getvalue()
+
+    # --- parsing ----------------------------------------------------------
+
+    def test_duration_parses_compound_and_full_width_forms(self):
+        from .author_metadata import parse_duration_to_months
+
+        for raw, expected in [
+            ('1 month(s)', 1),
+            ('1 year(s)', 12),
+            ('1 year(s)3 month(s)', 15),
+            ('1.5 year(s)', 18),
+            # NFKC folds the full-width digit the source really contains.
+            ('１ year(s)', 12),
+            ('1  month(s)', 1),
+            ('0 year(s)0 month(s)', 0),
+        ]:
+            with self.subTest(raw=raw):
+                months, note = parse_duration_to_months(raw)
+                self.assertEqual(float(months), expected)
+                self.assertIsNone(note)
+
+    def test_week_and_day_durations_use_mean_month_lengths(self):
+        from .author_metadata import parse_duration_to_months
+
+        week, _ = parse_duration_to_months('1 week(s)')
+        day, _ = parse_duration_to_months('5 day(s)')
+        self.assertAlmostEqual(float(week), 0.23, places=2)
+        self.assertAlmostEqual(float(day), 0.16, places=2)
+
+    def test_an_ambiguous_duration_is_not_silently_half_parsed(self):
+        """'2、3 year(s)' means "two or three years". Matching just the
+        '3 year(s)' and returning 36 would be a guess presented as data."""
+        from .author_metadata import parse_duration_to_months
+
+        months, note = parse_duration_to_months('2、3 year(s)')
+        self.assertIsNone(months)
+        self.assertIn('ambiguous', note)
+
+    def test_a_duration_in_another_notation_is_unparseable_not_zero(self):
+        from .author_metadata import parse_duration_to_months
+
+        for raw in ('2カ月', '８ヵ月'):
+            with self.subTest(raw=raw):
+                months, note = parse_duration_to_months(raw)
+                self.assertIsNone(months)
+                self.assertTrue(note)
+
+    def test_a_qualifier_keeps_the_number_and_reports_the_drop(self):
+        from .author_metadata import parse_duration_to_months
+
+        months, note = parse_duration_to_months('約10 year(s)')
+        self.assertEqual(float(months), 120)
+        self.assertIn('約', note)
+
+    def test_academic_year_runs_april_to_march(self):
+        """A January survey describes the academic year that began the
+        previous April — which is the year a filename refers to."""
+        from .author_metadata import parse_survey_date
+
+        self.assertEqual(parse_survey_date('2023/5/16')[1], 2023)
+        self.assertEqual(parse_survey_date('2024/1/10')[1], 2023)
+        self.assertEqual(parse_survey_date('2024/4/1')[1], 2024)
+
+    def test_a_date_with_no_year_yields_null_rather_than_a_guess(self):
+        from .author_metadata import parse_survey_date
+
+        self.assertEqual(parse_survey_date('11/27'), (None, None))
+        self.assertEqual(parse_survey_date(''), (None, None))
+
+    def test_mother_tongues_split_on_every_separator_the_source_uses(self):
+        from .author_metadata import split_mother_tongues
+
+        self.assertEqual(split_mother_tongues('Japanese、Malay'), {'Japanese', 'Malay'})
+        self.assertEqual(split_mother_tongues('Japanese・Malay'), {'Japanese', 'Malay'})
+        self.assertEqual(split_mother_tongues('Japanese, Malay'), {'Japanese', 'Malay'})
+        self.assertEqual(split_mother_tongues('Japanese'), {'Japanese'})
+        self.assertEqual(split_mother_tongues(''), set())
+
+    # --- import -----------------------------------------------------------
+
+    def test_imports_one_author_per_person_not_per_survey_row(self):
+        from .models import Author, AuthorSurvey
+
+        self._run()
+
+        self.assertEqual(Author.objects.count(), 6)
+        self.assertEqual(AuthorSurvey.objects.count(), 9)
+        achi = Author.objects.get(university='KUIS', name_code='ACHI')
+        self.assertEqual(achi.surveys.count(), 2)
+
+    def test_osaka_maps_to_the_catalogue_s_university_code(self):
+        """The surveys spell it out; the catalogue uses the filename prefix.
+        Without the mapping this author could never link to a file."""
+        from .models import Author
+
+        self._run()
+
+        self.assertTrue(Author.objects.filter(university='OU', name_code='MADA').exists())
+        self.assertFalse(Author.objects.filter(university='Osaka').exists())
+
+    def test_an_unknown_university_is_an_error_not_a_silent_pass_through(self):
+        from .models import Author
+
+        path = _write_csv(self.tmpdir, 'odd.csv', '\r\n'.join([
+            AUTHOR_CSV_HEADER,
+            'XXYY,2023/5/16,Hogwarts,18,Female,1,Indonesian,Japanese,'
+            '1 month(s),,,,,,,,,3,,',
+        ]))
+        out = StringIO()
+        with self.assertRaises(CommandError):
+            call_command('load_author_metadata', '--file', str(path), stdout=out)
+
+        self.assertIn('unrecognised university', out.getvalue())
+        self.assertFalse(Author.objects.filter(name_code='XXYY').exists())
+
+    def test_a_gender_conflict_resolves_to_null_and_is_reported(self):
+        """There is no non-arbitrary winner between Female and Male, and a
+        filter quietly believing the wrong one is worse than it not knowing."""
+        from .models import Author
+
+        output = self._run()
+
+        kona = Author.objects.get(university='KUIS', name_code='KONA')
+        self.assertIsNone(kona.gender)
+        self.assertTrue(kona.has_conflict)
+        self.assertIn('gender conflict', output)
+        self.assertIn('KONA', output)
+
+    def test_an_agreed_gender_is_kept(self):
+        from .models import Author
+
+        self._run()
+
+        self.assertEqual(
+            Author.objects.get(university='KUIS', name_code='ACHI').gender, 'Female',
+        )
+
+    def test_mother_tongues_are_the_union_across_a_person_s_surveys(self):
+        """NEGSEI's surveys say {Japanese, Malay} then {Malay}. Union invents
+        nothing — both were asserted by some survey — and resolving to NULL
+        instead would cost the Malay facet every one of its files."""
+        from .models import Author
+
+        output = self._run()
+
+        negsei = Author.objects.get(university='TUFS', name_code='NEGSEI')
+        self.assertEqual(
+            sorted(t.tongue for t in negsei.mother_tongues.all()),
+            ['Japanese', 'Malay'],
+        )
+        self.assertTrue(negsei.has_conflict)
+        self.assertIn('mother tongue sets differ', output)
+
+    def test_per_survey_values_that_vary_are_all_kept(self):
+        """Age and duration change between ACHI's two surveys. Both rows keep
+        their own value — which is exactly why neither is a facet yet."""
+        from .models import Author
+
+        self._run()
+
+        surveys = Author.objects.get(
+            university='KUIS', name_code='ACHI',
+        ).surveys.order_by('survey_date')
+
+        self.assertEqual([s.age for s in surveys], [18, 19])
+        self.assertEqual(
+            [float(s.duration_learning_months) for s in surveys], [1.0, 9.0],
+        )
+        self.assertEqual([s.academic_year for s in surveys], [2023, 2023])
+
+    def test_raw_values_are_kept_alongside_every_parsed_one(self):
+        """The client corrects the CSVs at source, so the database has to stay
+        reconstructible even where parsing failed."""
+        from .models import AuthorSurvey
+
+        self._run()
+
+        chid = AuthorSurvey.objects.get(author__name_code='CHID')
+        self.assertEqual(chid.duration_fl_1_raw, '2、3 year(s)')
+        self.assertIsNone(chid.duration_fl_1_months)
+
+        mada = AuthorSurvey.objects.get(author__name_code='MADA')
+        self.assertEqual(mada.survey_date_raw, '11/27')
+        self.assertIsNone(mada.survey_date)
+        self.assertAlmostEqual(float(mada.duration_of_stay_months), 0.23, places=2)
+
+    def test_the_last_column_has_no_trailing_carriage_return(self):
+        from .models import AuthorSurvey
+
+        self._run()
+
+        self.assertEqual(
+            AuthorSurvey.objects.get(author__name_code='MADA').reasons_en, 'simple',
+        )
+
+    def test_rerun_updates_rather_than_duplicating(self):
+        from .models import Author, AuthorMotherTongue, AuthorSurvey
+
+        self._run()
+        before = (Author.objects.count(), AuthorSurvey.objects.count(),
+                  AuthorMotherTongue.objects.count())
+
+        self._run()
+
+        self.assertEqual(
+            (Author.objects.count(), AuthorSurvey.objects.count(),
+             AuthorMotherTongue.objects.count()),
+            before,
+        )
+
+    def test_a_tongue_removed_at_source_disappears_on_reimport(self):
+        """The CSV is the authority, so tongues are replaced, not merged —
+        otherwise a correction could never take effect."""
+        from .models import Author
+
+        self._run()
+        negsei = Author.objects.get(name_code='NEGSEI')
+        self.assertEqual(negsei.mother_tongues.count(), 2)
+
+        corrected = _write_csv(self.tmpdir, 'KUIS.csv', '\r\n'.join([
+            AUTHOR_CSV_HEADER,
+            'NEGSEI,2023/5/11,TUFS,19,Male,2,Indonesian,Malay,1 year(s),'
+            'English,8 year(s),,,,,,,3,,',
+        ]))
+        call_command('load_author_metadata', '--file', str(corrected), stdout=StringIO())
+
+        self.assertEqual(
+            [t.tongue for t in Author.objects.get(name_code='NEGSEI').mother_tongues.all()],
+            ['Malay'],
+        )
+
+    def test_dry_run_writes_nothing_but_still_reports(self):
+        from .models import Author
+
+        output = self._run('--dry-run')
+
+        self.assertEqual(Author.objects.count(), 0)
+        self.assertIn('gender conflict', output)
+        self.assertIn('would import', output)
+
+    def test_missing_required_column_is_a_command_error(self):
+        path = _write_csv(self.tmpdir, 'bad.csv', 'Age,Gender\r\n18,Female')
+
+        with self.assertRaises(CommandError) as caught:
+            call_command('load_author_metadata', '--file', str(path), stdout=StringIO())
+
+        self.assertIn('name code', str(caught.exception))
+
+    def test_a_row_with_no_name_code_is_skipped_not_fatal(self):
+        from .models import Author
+
+        path = _write_csv(self.tmpdir, 'partial.csv', '\r\n'.join([
+            AUTHOR_CSV_HEADER,
+            ',2023/5/16,KUIS,18,Female,1,Indonesian,Japanese,1 month(s),,,,,,,,,3,,',
+            'OKAY,2023/5/16,KUIS,18,Female,1,Indonesian,Japanese,1 month(s),,,,,,,,,3,,',
+        ]))
+        out = StringIO()
+        call_command('load_author_metadata', '--file', str(path), stdout=out)
+
+        self.assertIn('no Name code', out.getvalue())
+        self.assertEqual(Author.objects.count(), 1)
+
+    def test_utf8_bom_is_tolerated(self):
+        from .models import Author
+
+        path = self.tmpdir / 'bom.csv'
+        with open(path, 'w', newline='', encoding='utf-8-sig') as handle:
+            handle.write(AUTHOR_CSV)
+
+        with self.assertRaises(CommandError):
+            call_command('load_author_metadata', '--file', str(path), stdout=StringIO())
+
+        self.assertTrue(Author.objects.filter(name_code='ACHI').exists())
+
+    # --- linking ----------------------------------------------------------
+
+    def test_linking_requires_university_AND_name_code(self):
+        """The correctness case this whole design turns on. A name code is not
+        unique across universities — in the real catalogue RAKA is both an OU
+        and a CHU student — so a name_code-only match would hand one
+        university's files another university's demographics.
+        """
+        from .models import Author, DocumentMetadata
+
+        DocumentMetadata.objects.create(
+            source_filename='TUFS2023NEGSEI201.txt', match_key='tufs2023negsei201',
+            university='TUFS', year=2023, grade=2, name_code='NEGSEI', source_file='c.csv',
+        )
+        # Same name code, different university, no survey row of its own.
+        DocumentMetadata.objects.create(
+            source_filename='CHU2023NEGSEI101.txt', match_key='chu2023negsei101',
+            university='CHU', year=2023, grade=1, name_code='NEGSEI', source_file='c.csv',
+        )
+
+        self._run()
+
+        right = DocumentMetadata.objects.get(match_key='tufs2023negsei201')
+        wrong = DocumentMetadata.objects.get(match_key='chu2023negsei101')
+
+        self.assertEqual(right.author, Author.objects.get(university='TUFS', name_code='NEGSEI'))
+        self.assertIsNone(wrong.author)
+
+    def test_either_import_order_converges(self):
+        """The catalogue and the surveys arrive independently, so whichever
+        lands second has to resolve the link."""
+        from .models import Author, DocumentMetadata
+
+        # Surveys first, catalogue second -> --relink closes the gap.
+        self._run()
+        DocumentMetadata.objects.create(
+            source_filename='KUIS2023ACHI101.txt', match_key='kuis2023achi101',
+            university='KUIS', year=2023, grade=1, name_code='ACHI', source_file='c.csv',
+        )
+        self.assertIsNone(DocumentMetadata.objects.get(match_key='kuis2023achi101').author)
+
+        call_command('load_author_metadata', '--relink', stdout=StringIO())
+
+        self.assertEqual(
+            DocumentMetadata.objects.get(match_key='kuis2023achi101').author,
+            Author.objects.get(university='KUIS', name_code='ACHI'),
+        )
+
+    def test_relink_with_no_authors_says_so_instead_of_failing(self):
+        out = StringIO()
+        call_command('load_author_metadata', '--relink', stdout=out)
+        self.assertIn('No authors imported yet', out.getvalue())
+
+    def test_coverage_names_catalogue_codes_with_no_survey_row(self):
+        from .models import DocumentMetadata
+
+        DocumentMetadata.objects.create(
+            source_filename='KUIS2023WAMO101.txt', match_key='kuis2023wamo101',
+            university='KUIS', year=2023, grade=1, name_code='WAMO', source_file='c.csv',
+        )
+
+        output = self._run()
+
+        self.assertIn('WAMO', output)
+        self.assertIn('no survey row', output)
+
+    def test_loads_the_real_repo_author_csvs(self):
+        """Against metadata/authors/*.csv as actually committed. The numbers
+        are the real corpus's, so a regression in parsing or linking shows up
+        as a changed count rather than as a silent behaviour change.
+        """
+        from .models import Author, AuthorMotherTongue, AuthorSurvey
+
+        out = StringIO()
+        with self.assertRaises(CommandError):
+            call_command('load_author_metadata', stdout=out)
+
+        self.assertEqual(Author.objects.count(), 235)
+        self.assertEqual(AuthorSurvey.objects.count(), 439)
+        # 225 authors have a tongue; NEGSEI has two.
+        self.assertEqual(AuthorMotherTongue.objects.count(), 226)
+        # order_by('tongue') before values_list is required, not stylistic:
+        # Meta.ordering is ['author', 'tongue'], and ORDER BY columns join the
+        # SELECT, which defeats .distinct(). facet_values() does the same.
+        self.assertEqual(
+            sorted(
+                AuthorMotherTongue.objects
+                .order_by('tongue')
+                .values_list('tongue', flat=True)
+                .distinct()
+            ),
+            ['Arabic', 'Japanese', 'Korean', 'Malay', 'Tagalog'],
+        )
+        # The two real inconsistencies, and only those two.
+        self.assertEqual(
+            sorted(str(a) for a in Author.objects.filter(has_conflict=True)),
+            ['KUIS/KONA', 'TUFS/NEGSEI'],
+        )
+
+
+class AuthorFacetFilterTests(ExplorerTestCase):
+    """The author facets — gender (single-valued) and mother_tongue
+    (multi-valued) — on the Django analysis surface
+    (docs/author-metadata-plan.md).
+
+    The fixture is built to exercise the cases the real data actually
+    contains:
+
+      * `annotated` -> a two-tongue writer (like TUFS/NEGSEI). This is the one
+        that proves EXISTS doesn't double-count.
+      * `plain`     -> a one-tongue writer of the other gender.
+      * `uncatalogued` -> no catalogue entry at all, so no author either.
+
+    Plus an author with no tongue rows and no uploaded file, standing in for
+    the two things that must never widen a result: an unsurveyed trait and an
+    author whose essays aren't in the corpus.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+
+        from .models import Author, AuthorMotherTongue, DocumentMetadata
+
+        cls.uncatalogued = Document.objects.create(
+            title='uncatalogued.txt', content=PLAIN_TEXT + ' extra',
+            content_hash='author-uncat-hash',
+        )
+        index_document.delay(cls.uncatalogued.id)
+        cls.corpus.documents.add(cls.uncatalogued)
+
+        # Two tongues, one person — the multi-value case.
+        cls.bilingual = Author.objects.create(
+            university='TUFS', name_code='NEGSEI', gender='Male', source_file='t.csv',
+        )
+        for tongue in ('Japanese', 'Malay'):
+            AuthorMotherTongue.objects.create(author=cls.bilingual, tongue=tongue)
+
+        cls.monolingual = Author.objects.create(
+            university='TUFS', name_code='FUYU', gender='Female', source_file='t.csv',
+        )
+        AuthorMotherTongue.objects.create(author=cls.monolingual, tongue='Japanese')
+
+        # Surveyed, but gender and tongue unrecorded: proves "(no value)" is
+        # about the VALUE, not only about a missing author.
+        cls.traitless = Author.objects.create(
+            university='TUFS', name_code='NOTRAIT', gender=None, source_file='t.csv',
+        )
+
+        # An author whose essays were never uploaded. Must never widen a
+        # result, and must never be offered as a facet value.
+        cls.absent_author = Author.objects.create(
+            university='SFC', name_code='GHOST', gender='Female', source_file='t.csv',
+        )
+        AuthorMotherTongue.objects.create(author=cls.absent_author, tongue='Korean')
+
+        DocumentMetadata.objects.create(
+            source_filename='annotated.txt', match_key='annotated', document=cls.annotated,
+            university='TUFS', year=2023, grade=3, name_code='NEGSEI',
+            author=cls.bilingual, source_file='t.csv',
+        )
+        DocumentMetadata.objects.create(
+            source_filename='plain.txt', match_key='plain', document=cls.plain,
+            university='TUFS', year=2023, grade=2, name_code='FUYU',
+            author=cls.monolingual, source_file='t.csv',
+        )
+        DocumentMetadata.objects.create(
+            source_filename='absent.txt', match_key='absent', document=None,
+            university='SFC', year=2024, grade=1, name_code='GHOST',
+            author=cls.absent_author, source_file='t.csv',
+        )
+
+    def titles(self, **params):
+        from .metadata_catalogue import metadata_filter_q, parse_facet_selection
+
+        self.select(self.corpus)
+        request = self.client.get(reverse('word_frequency'), params).wsgi_request
+
+        return set(
+            Document.objects.filter(corpora__id__in=[self.corpus.id])
+            .filter(metadata_filter_q(parse_facet_selection(request.GET)))
+            .distinct()
+            .values_list('title', flat=True)
+        )
+
+    ALL = {'annotated.xml', 'plain.txt', 'uncatalogued.txt'}
+
+    # --- gender: a column one hop past the catalogue row ------------------
+
+    def test_gender_narrows_to_that_writer(self):
+        self.assertEqual(self.titles(gender='Male'), {'annotated.xml'})
+        self.assertEqual(self.titles(gender='Female'), {'plain.txt'})
+
+    def test_gender_unset_covers_no_author_and_empty_gender_alike(self):
+        """The chained LEFT OUTER join's whole payoff: uncatalogued.txt has no
+        catalogue row, so no author, and that has to read the same as a
+        surveyed writer whose gender was never recorded."""
+        self.assertEqual(self.titles(gender='__none__'), {'uncatalogued.txt'})
+
+    def test_gender_values_and_unset_partition_the_corpus(self):
+        self.select(self.corpus)
+
+        def total(**params):
+            return self.client.get(
+                reverse('word_frequency'), params
+            ).context['selection_token_total']
+
+        self.assertEqual(
+            total(gender=['Female', 'Male']) + total(gender='__none__'),
+            total(),
+        )
+
+    # --- mother tongue: multi-valued, answered with EXISTS ----------------
+
+    def test_a_two_tongue_writer_matches_either_tongue(self):
+        self.assertEqual(self.titles(mother_tongue='Malay'), {'annotated.xml'})
+        self.assertEqual(
+            self.titles(mother_tongue='Japanese'),
+            {'annotated.xml', 'plain.txt'},
+        )
+
+    def test_tongues_within_the_facet_are_ORed(self):
+        """Same composition as every other facet: OR within, AND across. The
+        bilingual writer is already in the Japanese set, so adding Malay must
+        not change the count."""
+        self.assertEqual(
+            self.titles(mother_tongue=['Japanese', 'Malay']),
+            {'annotated.xml', 'plain.txt'},
+        )
+
+    def test_mother_tongue_unset_covers_no_author_and_no_tongue_rows(self):
+        self.assertEqual(self.titles(mother_tongue='__none__'), {'uncatalogued.txt'})
+
+    def test_a_two_tongue_writer_is_not_counted_twice(self):
+        """The reason the predicate is EXISTS and not a join.
+
+        A join through main_authormothertongue yields two rows for the
+        bilingual writer, and _analysis_context sums token_count over this
+        queryset — .distinct() dedupes rows, not an aggregate over them. So
+        filtering to a tongue that writer has must give exactly the same
+        token total as selecting that one document unfiltered.
+        """
+        self.select(self.corpus)
+
+        def total(**params):
+            return self.client.get(
+                reverse('word_frequency'), params
+            ).context['selection_token_total']
+
+        only_bilingual = total(mother_tongue='Malay')
+        self.assertEqual(only_bilingual, self.annotated.token_count)
+        self.assertGreater(only_bilingual, 0)
+
+        # And the union must not exceed the whole corpus either.
+        self.assertEqual(
+            total(mother_tongue=['Japanese', 'Malay']) + total(mother_tongue='__none__'),
+            total(),
+        )
+
+    def test_mother_tongue_values_and_unset_partition_the_corpus(self):
+        """Union + unset = total. Deliberately NOT the sum of per-value
+        counts: the bilingual writer legitimately appears under two values, so
+        a sum-based assertion would over-count and look like a bug."""
+        self.select(self.corpus)
+
+        def total(**params):
+            return self.client.get(
+                reverse('word_frequency'), params
+            ).context['selection_token_total']
+
+        union = total(mother_tongue=['Japanese', 'Malay'])
+        per_value_sum = total(mother_tongue='Japanese') + total(mother_tongue='Malay')
+
+        self.assertEqual(union + total(mother_tongue='__none__'), total())
+        self.assertGreater(per_value_sum, union)
+
+    # --- composition and coverage -----------------------------------------
+
+    def test_author_facets_AND_with_each_other_and_with_catalogue_facets(self):
+        self.assertEqual(self.titles(mother_tongue='Malay', gender='Male'), {'annotated.xml'})
+        self.assertEqual(self.titles(mother_tongue='Malay', gender='Female'), set())
+        self.assertEqual(self.titles(mother_tongue='Japanese', grade='2'), {'plain.txt'})
+
+    def test_an_author_with_no_uploaded_file_never_widens_the_result(self):
+        self.assertEqual(self.titles(mother_tongue='Korean'), set())
+        self.assertEqual(self.titles(name_code='GHOST'), set())
+
+    def test_facet_values_only_offers_tongues_with_an_uploaded_file(self):
+        """Korean is a real recorded tongue whose only speaker has no
+        catalogued essay — offering it would be a guaranteed-empty filter.
+        This is the same reason Arabic and Korean are absent from the real
+        corpus's control."""
+        from .metadata_catalogue import facet_values
+
+        available = facet_values()
+        self.assertEqual(available['mother_tongue'], ['Japanese', 'Malay'])
+        self.assertEqual(available['gender'], ['Female', 'Male'])
+
+    def test_analysis_pages_and_exports_apply_the_author_facets(self):
+        self.select(self.corpus)
+
+        for name in ['word_frequency', 'collocations', 'ngrams', 'dashboard']:
+            with self.subTest(view=name):
+                response = self.client.get(reverse(name), {'mother_tongue': 'Japanese'})
+                self.assertEqual(response.status_code, 200)
+
+        unfiltered = self.client.get(reverse('word_frequency_export_csv'))
+        filtered = self.client.get(
+            reverse('word_frequency_export_csv'), {'mother_tongue': 'Malay'}
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertLess(len(filtered.content), len(unfiltered.content))
+
+    def test_controls_render_with_a_coverage_note(self):
+        """Only three of seven universities are surveyed, so a silent drop of
+        the rest is the main way this feature could mislead. The note has to
+        actually reach the page."""
+        self.select(self.corpus)
+        html = self.client.get(reverse('word_frequency')).content.decode()
+
+        self.assertIn('name="gender"', html)
+        self.assertIn('name="mother_tongue"', html)
+        self.assertIn('Mother tongue', html)
+        self.assertIn('Not surveyed for every university', html)
+
+    def test_results_toolbar_carries_the_author_facets_forward(self):
+        """Applying a text filter, re-sorting or exporting must preserve an
+        author facet, exactly as it preserves a catalogue facet.
+
+        Note this is the OPPOSITE assertion to the context form's, and both
+        are correct: the context form holds the real checkboxes, so a hidden
+        copy there would submit twice, while the toolbar's own forms need the
+        hidden copy or applying a text filter would silently drop the metadata
+        filter. MetadataFilterViewTests covers the context-form side for every
+        facet including these two.
+        """
+        self.select(self.corpus)
+        html = self.client.get(
+            reverse('word_frequency'), {'mother_tongue': 'Japanese'}
+        ).content.decode()
+
+        self.assertIn('<input type="hidden" name="mother_tongue" value="Japanese">', html)
+        self.assertIn('export/?mother_tongue=Japanese', html)
+        self.assertIn('?mother_tongue=Japanese&amp;sort=', html)
 
 
 class DocumentMetadataApiTests(ExplorerTestCase):

@@ -342,6 +342,28 @@ class DocumentMetadata(models.Model):
     word_count = models.IntegerField(null=True, blank=True)
     name_code = models.CharField(max_length=50, null=True, blank=True)
 
+    # The person who wrote this file, resolved from (university, name_code)
+    # against the survey CSVs (docs/author-metadata-plan.md). Nullable for the
+    # same reason `document` is, and then some: four of the seven universities
+    # (APU, CHU, SFC, SOP) have no survey data at all, so ~53% of the
+    # catalogue is legitimately author-less. NULL here is what the filter's
+    # "(not specified)" option selects, via the same LEFT OUTER JOIN that
+    # already makes a missing catalogue row and an empty field equivalent.
+    #
+    # SET_NULL rather than CASCADE, matching `document` above: the catalogue
+    # row is source data that should outlive a deleted author.
+    #
+    # Resolved on (university, name_code) TOGETHER — never name_code alone.
+    # See Author's docstring: name_code collides across universities and a
+    # one-sided key mis-assigns 8 real files.
+    author = models.ForeignKey(
+        'Author',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='documents',
+    )
+
     source_file = models.CharField(max_length=100)
     imported_at = models.DateTimeField(auto_now=True)
 
@@ -352,10 +374,214 @@ class DocumentMetadata(models.Model):
             models.Index(fields=['university']),
             models.Index(fields=['year', 'grade']),
             models.Index(fields=['name_code']),
+            models.Index(fields=['author']),
         ]
 
     def __str__(self):
         return self.source_filename
+
+
+class Author(models.Model):
+    """The person who wrote the essays — one row per (university, name_code),
+    built from the person-level survey CSVs in metadata/authors/
+    (docs/author-metadata-plan.md).
+
+    A separate table from DocumentMetadata because the grain is different:
+    the catalogue has one row per FILE, the surveys have one row per PERSON
+    per survey occasion. ~235 people wrote ~735 of the catalogued files.
+
+    `unique_together` on (university, name_code) rather than name_code alone
+    is load-bearing, not defensive. name_code is NOT unique across
+    universities in the real catalogue: RAKA is both an OU and a CHU student,
+    NAMI both KUIS and APU, and five more besides. Five of those collisions
+    have survey data under exactly one of their two universities, so a
+    name_code-only key would silently hand 8 files another person's
+    demographics. The university is part of the identity.
+
+    Only the fields that are genuinely invariant for a person live here.
+    Age, learning duration and the difficulty self-rating all change between
+    a person's surveys — they are surveyed twice per academic year, and a
+    filename only records year and grade, never which survey — so attaching
+    one of those values to a file would mean choosing arbitrarily. They stay
+    on AuthorSurvey until the client decides the rule.
+    """
+
+    university = models.CharField(max_length=50)
+    name_code = models.CharField(max_length=50)
+
+    # Derived from the surveys, which agree on it in all but one case.
+    # NULL when they disagree: a conflict resolves to "unknown", never to a
+    # guess, and the importer reports it for the client to correct at source.
+    gender = models.CharField(max_length=20, null=True, blank=True)
+    # The source string verbatim, so a normalisation bug is always traceable
+    # back to what the CSV actually said. Same raw-plus-parsed discipline as
+    # AuthorSurvey's durations.
+    gender_raw = models.CharField(max_length=100, blank=True, default='')
+
+    # Set when a person's surveys disagree on anything invariant. Reported by
+    # the importer and surfaced in the admin; it never changes how the filter
+    # behaves, it just stops a conflict from being invisible.
+    has_conflict = models.BooleanField(default=False)
+    conflict_note = models.TextField(blank=True, default='')
+
+    source_file = models.CharField(max_length=100)
+    imported_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['university', 'name_code'],
+                name='uniq_author_university_name_code',
+            ),
+        ]
+        ordering = ['university', 'name_code']
+        indexes = [
+            models.Index(fields=['gender']),
+        ]
+
+    def __str__(self):
+        return f'{self.university}/{self.name_code}'
+
+
+class AuthorMotherTongue(models.Model):
+    """One mother tongue of one author — a child table, not a column, because
+    a person can have more than one (TUFS/NEGSEI has Japanese and Malay).
+
+    Populated as the UNION of every tongue across that person's surveys.
+    Union is the right resolution precisely because it invents nothing: every
+    value in it was asserted by some survey of that person. Resolving a
+    set-level disagreement to NULL instead would have made Malay vanish from
+    the facet entirely over one inconsistent row, taking 21 filterable files
+    with it.
+
+    The filter reads this with EXISTS rather than a join (see
+    main/metadata_catalogue.py::_facet_q and
+    dataplane/repositories/shared.py::_metadata_conditions). A join would
+    multiply rows, and _analysis_context sums token_count over that same
+    queryset, so a two-tongue document would be counted twice.
+    """
+
+    author = models.ForeignKey(
+        Author,
+        on_delete=models.CASCADE,
+        related_name='mother_tongues',
+    )
+    tongue = models.CharField(max_length=50)
+    tongue_raw = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['author', 'tongue'],
+                name='uniq_author_mother_tongue',
+            ),
+        ]
+        ordering = ['author', 'tongue']
+        indexes = [
+            models.Index(fields=['tongue']),
+        ]
+
+    def __str__(self):
+        return f'{self.author}: {self.tongue}'
+
+
+class AuthorSurvey(models.Model):
+    """One survey occasion for one author — all 20 source columns preserved,
+    whether or not anything filters on them yet.
+
+    Stored in full rather than reduced to the two facets that ship, for two
+    reasons. The data is research source material and the client corrects it
+    at source, so it has to be auditable against the CSV. And age / duration /
+    difficulty become filterable the moment the client picks a rule for which
+    survey applies to a file — with the rows already here, that is a config
+    change, not a re-import.
+
+    Every normalised value is stored as a PAIR: the raw string exactly as the
+    CSV had it, plus the parsed form (NULL when unparseable). Three real
+    duration cells don't parse ('2カ月', '８ヵ月', '2､3 year(s)') and two dates
+    have no year ('11/27'); none of those is allowed to destroy what the
+    source said.
+    """
+
+    author = models.ForeignKey(
+        Author,
+        on_delete=models.CASCADE,
+        related_name='surveys',
+    )
+
+    # survey_date is NULL for the 11 blank and 2 year-less dates; the raw
+    # string is still the identity of the occasion, which is why
+    # unique_together uses it rather than the parsed date.
+    survey_date = models.DateField(null=True, blank=True)
+    survey_date_raw = models.CharField(max_length=50, blank=True, default='')
+    # Japanese academic year: April-March, so a January 2024 survey belongs to
+    # academic year 2023 — which is what a 2023 filename refers to.
+    academic_year = models.IntegerField(null=True, blank=True)
+
+    age = models.IntegerField(null=True, blank=True)
+    grade = models.IntegerField(null=True, blank=True)
+    # Deliberately NOT a facet: the vocabulary isn't comparable across
+    # universities. KUIS and OU record a language ('Indonesian'), TUFS records
+    # a faculty ('School of International and Area Studies, Oceania').
+    major = models.CharField(max_length=200, blank=True, default='')
+    # This occasion's raw cell. The filterable, split form lives in
+    # AuthorMotherTongue.
+    mother_tongues_raw = models.CharField(max_length=200, blank=True, default='')
+
+    duration_learning_raw = models.CharField(max_length=100, blank=True, default='')
+    duration_learning_months = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+    )
+
+    other_fl_1 = models.CharField(max_length=100, blank=True, default='')
+    duration_fl_1_raw = models.CharField(max_length=100, blank=True, default='')
+    duration_fl_1_months = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+    )
+
+    other_fl_2 = models.CharField(max_length=100, blank=True, default='')
+    duration_fl_2_raw = models.CharField(max_length=100, blank=True, default='')
+    duration_fl_2_months = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+    )
+
+    # 91% blank in the source (26 linked files), hence not a facet.
+    proficiency_level = models.CharField(max_length=50, blank=True, default='')
+    test_month_year = models.CharField(max_length=50, blank=True, default='')
+
+    # Free text with 36 variants and three different separators — stored
+    # verbatim, deliberately not normalised into places.
+    place_of_stay = models.CharField(max_length=200, blank=True, default='')
+    duration_of_stay_raw = models.CharField(max_length=100, blank=True, default='')
+    duration_of_stay_months = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True,
+    )
+
+    # 1 (very easy) .. 5 (very difficult), self-reported.
+    difficulty_level = models.IntegerField(null=True, blank=True)
+    reasons = models.TextField(blank=True, default='')
+    reasons_en = models.TextField(blank=True, default='')
+
+    source_file = models.CharField(max_length=100)
+    imported_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # Keyed on the raw date string, not the parsed date: it is what
+            # identifies the occasion, it survives an unparseable value, and
+            # the source has no duplicate (university, name_code, date).
+            models.UniqueConstraint(
+                fields=['author', 'survey_date_raw'],
+                name='uniq_author_survey_date',
+            ),
+        ]
+        ordering = ['author', 'survey_date_raw']
+        indexes = [
+            models.Index(fields=['academic_year', 'grade']),
+        ]
+
+    def __str__(self):
+        return f'{self.author} @ {self.survey_date_raw or "?"}'
 
 
 def build_tokens(document):

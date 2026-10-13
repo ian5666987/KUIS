@@ -28,6 +28,7 @@
 | 7.5 | User management for Admins + Super Admins (`docs/user-management-plan.md`) | ✅ done (2026-10-02) |
 | 7.6 | Error Summary hierarchical breakdown (`by_node` roll-up + expandable tree) | ✅ done (2026-10-02) |
 | 7.7 | Document metadata catalogue + secondary filters (`docs/metadata-catalogue-plan.md`, `docs/metadata-matching.md`) | ✅ done (2026-10-02) — not yet loaded into `corpus_db` |
+| 7.8 | Author (person-level) metadata + `gender`/`mother_tongue` facets (`docs/author-metadata-plan.md`) | ✅ done (2026-10-13) — backend only; not yet loaded into `corpus_db`, KUIS-FE controls pending |
 | 8 | Caching (Tier 4) + retire superseded Django views | ⬜ not started |
 
 ### Phase 0 — done, what actually landed
@@ -390,6 +391,30 @@ New: `main/metadata_catalogue.py` (neutral module — the match formula, the imp
 
 ---
 
+### Phase 7.8 — Author metadata + author facets
+
+Full reasoning: **`docs/author-metadata-plan.md`**. What matters architecturally:
+
+**A second grain, so a second table — not more columns on `DocumentMetadata`.** The catalogue is one row per *file*; the survey CSVs are one row per *person per survey occasion* (439 rows, 235 people). `Author` holds only what is invariant for a person, `AuthorSurvey` holds all 20 source columns per occasion, and `DocumentMetadata` gains a nullable `author` FK (migration `0015`).
+
+**The join key is `(university, name_code)`, and that is a correctness requirement.** `name_code` collides across universities in the real catalogue — seven codes appear under two universities, five of them with survey data on one side only — so a `name_code`-only match would give 8 real files another person's demographics. Enforced by a `UniqueConstraint`, asserted directly in the test suite.
+
+**The filter grew two facets without changing where it is applied.** `gender` is a column one *chained* `isouter` join past `document_metadata`; the chained LEFT OUTER is what keeps "(no value)" meaning all three of "field empty", "no author" and "no catalogue row" in a single `IS NULL`. The author table is joined only when an author facet is actually filtered, so every pre-existing filter keeps its old query plan. Both chokepoints (`resolve_document_ids`, `_get_selected_documents`) are otherwise untouched, and no repository, SQL builder, worker task or export route changed — the same single-mechanism payoff 7.7 was built for.
+
+**`mother_tongue` is multi-valued, and is answered with `EXISTS` rather than a join.** A person can have several tongues (`AuthorMotherTongue`, one row each). Joining the child table would multiply rows for a two-tongue writer, and `_analysis_context` sums `token_count` over that queryset — `.distinct()` dedupes rows, not an aggregate over them. `EXISTS` asks membership without touching cardinality, and `NOT EXISTS` covers all three unknown cases on its own. Precedent existed: `name_code` was already a facet outside the column map. Composition is unchanged — OR within a facet, AND across facets.
+
+**Conflicts resolve to NULL for single-valued traits, to the UNION for mother tongue.** Union invents nothing (every tongue in it was asserted by some survey of that person), whereas NULLing on a set disagreement would have cost the Malay facet all 21 of its files over one inconsistent row. Every normalised value is stored raw-plus-parsed, and a *partial* duration parse is treated as a failure rather than a number.
+
+**Only two of the five requested traits became facets.** Age, duration of learning and difficulty all change between a person's two surveys per academic year, and a filename records only year and grade — so attaching one value per file would mean choosing arbitrarily. They are imported and stored, awaiting a client rule. `Major` is worse: KUIS/OU record a language, TUFS a faculty.
+
+New: `main/author_metadata.py`, `main/management/commands/load_author_metadata.py`, `main/migrations/0015_author_metadata.py`, three table mirrors in `dataplane/models/tables.py` (+ 3 registrations each in `test_schema_drift.py`), `genders`/`mother_tongues` on `MetadataFilter`, `MetadataFacets`, `MetadataFilterParams` and `MetadataFacetsResponse`.
+
+Also fixed here: the three survey CSVs had been dropped into `metadata/`, where `load_metadata_catalogue`'s non-recursive `*.csv` glob and required-header check made them abort the entire catalogue import. They live in `metadata/authors/` now, with a regression test over the real directory.
+
+*(Status: ✅ done, backend — 228/228 Django tests, 172/172 data plane tests, all seven endpoints exercised with both new facets. **Not yet applied to `corpus_db`**: `0015` is unapplied there, as `0014` still is. KUIS-FE controls not built; the Django picker renders both facets with a coverage note, since only 3 of 7 universities are surveyed and 53% of the corpus answers "(no value)".)*
+
+---
+
 ## Context
 
 KUIS is currently a pure Django 6.0.4 server-rendered monolith (`config/` + one app `main/`) with no REST API, no JS framework, no background worker, and no Docker/CI. `docs/ONBOARDING.md` documents it as-is; `docs/optimisation_plan.md` (already in-repo) separately diagnoses real scaling problems in how it stores and queries corpus tokens — four of its five analysis features re-parse raw document XML on every request with no cache, and the one feature that does query a precomputed `Token` table (fast-KWIC) still does it inefficiently.
@@ -609,7 +634,7 @@ Matches the verified house pattern (checked against `identity-service-internal`'
 6. **Tier 1/2 schema optimization** — ✅ done. `WordType`, normalized `Token` (word_type FK replacing word), `DocumentWordFreq`, `DocumentNgram` migrations applied to the real `corpus_db` (with explicit confirmation, verified in stages); the worker populates them for new uploads and `backfill_tier2` populated them for the 3 pre-existing real documents; frequency/collocation/ngram repositories swapped onto the new tables with Service/Router/Next.js genuinely untouched (confirmed via `git status` in KUIS-FE, not just claimed). KWIC's repository also needed a fix (word_type join) since `Token.word` disappeared, though it doesn't swap onto an aggregate table — concordance search needs position-level data no aggregate can provide.
 7. **RBAC enforcement + Corpus/Document CRUD API** — ✅ done. The permission *rule* already existed and was already correctly enforced server-side (a single `is_staff` boolean, consistent across Django views, JWT claims, and the FastAPI `require_staff` dependency); this phase exposed corpus/document writes over the API for the first time and built real KUIS-FE pages on top of it, including the cosmetic `is_staff` UI gating the Phase 1 design always intended but never implemented until now. Verified via 20 new Django tests (63/63 total) and a live, non-destructive check against the user's own already-running dev servers. Full detail in the Phase 6 status block above.
 8. **Error Analytics (new build)** — ✅ done. The taxonomy blocker (`docs/ONBOARDING.md` §3/§9) was resolved by `info/error.xml`. Shipped as Error Frequency + EPIC behind one flat OR-combined code filter (not the planned `path__startswith` subtree axis — see the Phase 7 status block for why), a decoupled `/api/v1/taxonomy`, three models in migration `0012`, and the nested-segment tokenizer fix. Extended in Phase 7.6 with the hierarchical Summary. `docs/error-analytics-plan.md`.
-9. **Caching (Tier 4) + cleanup** — ⬜ not started. Redis-backed cache at the Service layer, keyed on `(sorted corpus ids, mode, feature, n)`. This is also when the now-superseded Django live-parse views finally retire. **Note the key is now wider than planned**: the Phase 7.7 metadata filter is a second scoping axis, so any cache key has to include it (and the error-analytics code filter) or a filtered request will serve an unfiltered result.
+9. **Caching (Tier 4) + cleanup** — ⬜ not started. Redis-backed cache at the Service layer, keyed on `(sorted corpus ids, mode, feature, n)`. This is also when the now-superseded Django live-parse views finally retire. **Note the key is now wider than planned**: the Phase 7.7 metadata filter is a second scoping axis, so any cache key has to include it (and the error-analytics code filter) or a filtered request will serve an unfiltered result. That filter has since grown the `gender` and `mother_tongue` facets (Phase 7.8), so the key must cover all five facets plus the `__none__` sentinel per facet — the authority for what the filter carries is `MetadataFilter` in `dataplane/repositories/base.py`, not a list duplicated here.
 
 **Shipped outside the original eight.** Each is a numbered sub-phase above, with its own doc where the design warranted one: content-hash dedup (6.7), public/private corpora (6.8), user management for Admins + Super Admins (7.5), the Error Summary tree (7.6), and the document metadata catalogue + secondary filters (7.7).
 

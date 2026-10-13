@@ -28,6 +28,14 @@
         <fieldset class="picker__facet">
           <legend class="context__label">{{ facet.label }}</legend>
 
+          {% comment %} Author facets carry a coverage note: only three of the seven
+             universities have survey data, so ticking one of these excludes
+             every unsurveyed file. Saying so beside the control is the point —
+             a filter that quietly halves the corpus is the real risk here. {% endcomment %}
+          {% if facet.hint %}
+            <p class="text-sm text-muted">{{ facet.hint }}</p>
+          {% endif %}
+
           {% for value in facet.values %}
             <label class="picker__facet-row">
               <input type="checkbox" name="{{ facet.name }}" value="{{ value }}"

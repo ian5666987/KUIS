@@ -502,6 +502,21 @@ METADATA_FACET_LABELS = {
     'university': 'University',
     'year': 'Year',
     'grade': 'Grade',
+    # Author facets (docs/author-metadata-plan.md). "Mother tongue" is
+    # singular in the label even though a writer can have several: the control
+    # asks which tongue to filter BY, and ticking two means "either".
+    'gender': 'Gender',
+    'mother_tongue': 'Mother tongue',
+}
+
+# Facets that read the author survey data rather than the file catalogue. Only
+# three of the seven universities have been surveyed, so these carry a note:
+# ticking one of them silently drops every file whose writer wasn't surveyed,
+# and a filter that quietly halves the corpus without saying so is the main
+# way this feature could mislead someone.
+METADATA_FACET_HINTS = {
+    'gender': 'Not surveyed for every university — unsurveyed files are "(no value)".',
+    'mother_tongue': 'Not surveyed for every university — unsurveyed files are "(no value)".',
 }
 
 
@@ -523,6 +538,7 @@ def _metadata_facet_context(request):
         facets.append({
             'name': name,
             'label': METADATA_FACET_LABELS.get(name, name.replace('_', ' ').title()),
+            'hint': METADATA_FACET_HINTS.get(name, ''),
             'values': [str(v) for v in available.get(name, [])],
             'selected': {str(v) for v in raw},
             'unset_selected': UNSET in raw,

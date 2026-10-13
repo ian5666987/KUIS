@@ -40,3 +40,11 @@ Called from `main/document_ingest.py::get_or_create_document` (on create only) a
 - **Matching on `Document.content_hash`** rather than a filename, which would survive renames entirely — the catalogue records no hash, so there is nothing to match against.
 - **Reconciling byte-identical files under two catalogue names** (above) — the import reports the orphan; resolving it is manual.
 - **Re-linking on title edit.** Nothing re-runs matching when a document is renamed; `--relink` is the manual path.
+
+## Author linking is a different key, and still not the filename
+
+Person-level author metadata (`docs/author-metadata-plan.md`) does **not** use the match key above. A survey row describes a person, not a file, so `DocumentMetadata.author` resolves on `(university, name_code)` — both **CSV columns**, matched exactly, with `Osaka` mapped to `OU`.
+
+Both columns, always. `name_code` is not unique across universities: `RAKA` is both an OU and a CHU student, `NAMI` both KUIS and APU, and five more besides. Matching on `name_code` alone would hand 8 real files another person's demographics. Enforced by `UniqueConstraint(university, name_code)` on `Author`.
+
+This does not weaken the no-heuristics policy above — it strengthens it. `KUIS2023ACHI101` *does* encode university, year, name code, grade and file number, and that decomposition was verified against all 1,559 catalogue rows: every filename matches `^[A-Z]+20\d\d[A-Za-z]+\d{3}[a-z]*$`, and the embedded values agree with the CSV columns in **100% of rows, zero mismatches**. The columns are therefore the authority, and no filename parser exists in the match path — exactly as for the catalogue key.

@@ -10,7 +10,7 @@
 
 ## 1. Project Overview
 
-**KUIS** is a corpus-linguistics application for analyzing an Indonesian-language learner corpus. Admins upload XML files (plain text plus `<segment>` error annotations with corrections) and group them into named **corpora**; registered users then run reports across any multi-select of those corpora: word frequency, collocations, n-grams, KWIC (keyword-in-context), and error analytics (error frequency, EPIC, and a hierarchical error summary) — each with an "original vs. corrected" text toggle, and each additionally narrowable by a secondary per-document **metadata filter** (university / year / grade / name code).
+**KUIS** is a corpus-linguistics application for analyzing an Indonesian-language learner corpus. Admins upload XML files (plain text plus `<segment>` error annotations with corrections) and group them into named **corpora**; registered users then run reports across any multi-select of those corpora: word frequency, collocations, n-grams, KWIC (keyword-in-context), and error analytics (error frequency, EPIC, and a hierarchical error summary) — each with an "original vs. corrected" text toggle, and each additionally narrowable by a secondary per-document **metadata filter** (university / year / grade / name code, plus the writer's gender and mother tongue — see `docs/author-metadata-plan.md`).
 
 ### Four services, two repositories, two live user interfaces
 
@@ -101,6 +101,7 @@ Super Admin accounts are **not manageable through this feature at all** (both ti
 | `seed [--update]` | Bootstraps one super admin (`is_staff`+`is_superuser`) and one non-admin user from the `SEED_*` vars in `.env`. Idempotent. **Required on a fresh database** — without an `is_staff` account nobody can upload or create corpora, so no analysis is possible at all |
 | `load_error_taxonomy` | Loads the ~90-code error taxonomy from `info/error.xml` into `ErrorTaxonomyNode`. Replaces the whole table each run. **Run before uploading documents** — annotations resolve against this table at extraction time |
 | `load_metadata_catalogue [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/*.csv` (1,557 entries from 1,559 rows) into `DocumentMetadata` and links each row to its `Document`. Idempotent; `--relink` re-resolves FKs without reading any CSV |
+| `load_author_metadata [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/authors/*.csv` (235 authors, 439 surveys from 439 rows) into `Author`/`AuthorMotherTongue`/`AuthorSurvey` and links each author to its catalogue rows on `(university, name_code)`. Idempotent. **Exits non-zero when the source data has an error** — that is by design; run `--dry-run` first and read the report (`docs/author-metadata-plan.md`) |
 | `retokenize [--dry-run]` | Rebuilds all `Token` rows from current `Document.content` **and** refreshes the Tier-2 aggregates. Run after changing tokenization logic or editing a document's content |
 | `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens |
 | `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the taxonomy was loaded. Does not rebuild tokens |
@@ -152,6 +153,7 @@ main/                          # Django app — back office + both auth surfaces
   static/main/kuis.css — the whole interface: design tokens, then components
   static/main/kuis.js  — optional enhancements only; nothing depends on it
   management/commands/ — seed, load_error_taxonomy, load_metadata_catalogue,
+                         load_author_metadata,
                          retokenize, backfill_{tier2,error_annotations,
                          content_hash}
   migrations/          — 0001-0014 (0006 and 0008 are data migrations)
@@ -453,7 +455,7 @@ Use `python manage.py seed` (§8/§9) to get a super admin and a non-admin accou
 5. **PostgreSQL 16** — one role + one empty database matching your `.env`. Optionally a second database whose name contains "test", for the data plane suite.
 6. **Redis 7** — not optional. The worker is the only writer of every derived table.
 7. **Admin + test user** — `python manage.py seed`. **Required**: without an `is_staff` account nobody can upload files or create corpora, which means no analysis is possible at all; the non-admin account is what lets you exercise the RBAC boundary (§5) without a second manual signup. Creates the admin as `is_staff` **and** `is_superuser`, so it is also your only Super Admin. Idempotent; `--update` resets password/flags. `createsuperuser` still works as a one-off alternative for the admin only.
-8. **Reference data, in this order** — `load_error_taxonomy` **before any upload** (annotations resolve against that table at extraction time), then `load_metadata_catalogue`. Both are idempotent and deliberately kept out of migration history, because taxonomy glosses and catalogue rows get corrected independently of the schema.
+8. **Reference data, in this order** — `load_error_taxonomy` **before any upload** (annotations resolve against that table at extraction time), then `load_metadata_catalogue`, then `load_author_metadata` (which links against the catalogue rows the previous step created). All three are idempotent and deliberately kept out of migration history, because taxonomy glosses, catalogue rows and survey data all get corrected independently of the schema. `load_author_metadata` exits non-zero when the source CSVs contain a data error — see `docs/author-metadata-plan.md`.
 9. **Deployment infrastructure** — `docker/{django,fastapi,worker}.Dockerfile`, `docker-compose.yml` and `.github/workflows/{ci,deploy}.yml` exist. Note the compose stack publishes **no host ports** (an externally deployed `nginx-gateway` is the only public entry point) and needs `docker network create app-shared` once per machine. **KUIS-FE has no Docker or CI files yet.** Revisit `ALLOWED_HOSTS`, `EMAIL_BACKEND` and `STATIC_ROOT`/`MEDIA_ROOT` before deploying with `DEBUG=False`.
 
 ### Handled automatically
@@ -492,6 +494,7 @@ python manage.py migrate
 python manage.py seed                      # not optional — see §8.7
 python manage.py load_error_taxonomy       # before any upload — see §8.8
 python manage.py load_metadata_catalogue
+python manage.py load_author_metadata
 ```
 
 Then **three terminals**, each with the venv activated:

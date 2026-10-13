@@ -33,9 +33,20 @@ docker run -d --name kuis-redis -p 6379:6379 redis:7-alpine   # Windows
 **5. Backend: venv + dependencies**
 ```bash
 cd KUIS
-python3 -m venv venv && source venv/bin/activate    # Windows: python -m venv venv; venv\Scripts\Activate.ps1
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
+*Windows (Command Prompt):* `;` is **not** a command separator in cmd — run these as four
+separate lines, and use `activate`, not `Activate.ps1` (that one is PowerShell-only):
+```
+cd C:\KUIS
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+`python -m venv venv` prints **nothing at all for 30-90 seconds** while it unpacks pip.
+That is normal, not a hang. Check `C:\KUIS\venv\Scripts\` in Explorer if unsure. If you
+interrupt it, `rmdir /s /q venv` before retrying. Once active the prompt shows `(venv)`.
 
 **6. Backend `.env`**
 ```bash
@@ -51,7 +62,9 @@ Leave `DB_*` / `REDIS_URL` / `CORS_ALLOWED_ORIGINS` at their defaults.
 python manage.py migrate                   # tables
 python manage.py seed                      # admin + plain user — without this nobody can upload
 python manage.py load_error_taxonomy       # MUST run before any upload
-python manage.py load_metadata_catalogue   # metadata facets
+python manage.py load_metadata_catalogue   # file metadata facets
+python manage.py load_author_metadata --dry-run   # read the data-quality report
+python manage.py load_author_metadata      # author facets (gender, mother tongue)
 python manage.py check                     # sanity
 ```
 

@@ -44,10 +44,12 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Integer,
     JSON,
     MetaData,
+    Numeric,
     SmallInteger,
     String,
     Table,
@@ -192,6 +194,79 @@ document_metadata = Table(
     Column("topic_en", String(100), nullable=True),
     Column("word_count", Integer, nullable=True),
     Column("name_code", String(50), nullable=True),
+    # Nullable, and read through a second chained LEFT OUTER join in
+    # dataplane/repositories/shared.py: four of seven universities have no
+    # survey data, so NULL here is the normal case for ~53% of the catalogue
+    # and is exactly what the filter's "(not specified)" option selects.
+    Column("author_id", BigInteger, nullable=True),
+    Column("source_file", String(100)),
+    Column("imported_at", DateTime(timezone=True)),
+)
+
+
+# docs/author-metadata-plan.md. The person behind a catalogue row, keyed on
+# (university, name_code) — never name_code alone, which collides across
+# universities in the real data. Only `gender` is read by the filter from this
+# table; the multi-valued mother tongue lives in author_mother_tongue below.
+author = Table(
+    "main_author",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("university", String(50)),
+    Column("name_code", String(50)),
+    Column("gender", String(20), nullable=True),
+    Column("gender_raw", String(100)),
+    Column("has_conflict", Boolean),
+    Column("conflict_note", Text),
+    Column("source_file", String(100)),
+    Column("imported_at", DateTime(timezone=True)),
+)
+
+
+# One tongue per row: a person can have several. Queried with EXISTS from
+# shared.py::_metadata_conditions rather than joined, so a two-tongue document
+# is never counted twice by the aggregate features.
+author_mother_tongue = Table(
+    "main_authormothertongue",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("author_id", BigInteger),
+    Column("tongue", String(50)),
+    Column("tongue_raw", String(200)),
+)
+
+
+# Every survey occasion in full. Mirrored for completeness and for future
+# facets (age / duration / difficulty, which need a client decision on which
+# occasion applies to a file) — nothing in the dataplane reads it yet.
+author_survey = Table(
+    "main_authorsurvey",
+    metadata,
+    Column("id", BigInteger, primary_key=True),
+    Column("author_id", BigInteger),
+    Column("survey_date", Date, nullable=True),
+    Column("survey_date_raw", String(50)),
+    Column("academic_year", Integer, nullable=True),
+    Column("age", Integer, nullable=True),
+    Column("grade", Integer, nullable=True),
+    Column("major", String(200)),
+    Column("mother_tongues_raw", String(200)),
+    Column("duration_learning_raw", String(100)),
+    Column("duration_learning_months", Numeric(8, 2), nullable=True),
+    Column("other_fl_1", String(100)),
+    Column("duration_fl_1_raw", String(100)),
+    Column("duration_fl_1_months", Numeric(8, 2), nullable=True),
+    Column("other_fl_2", String(100)),
+    Column("duration_fl_2_raw", String(100)),
+    Column("duration_fl_2_months", Numeric(8, 2), nullable=True),
+    Column("proficiency_level", String(50)),
+    Column("test_month_year", String(50)),
+    Column("place_of_stay", String(200)),
+    Column("duration_of_stay_raw", String(100)),
+    Column("duration_of_stay_months", Numeric(8, 2), nullable=True),
+    Column("difficulty_level", Integer, nullable=True),
+    Column("reasons", Text),
+    Column("reasons_en", Text),
     Column("source_file", String(100)),
     Column("imported_at", DateTime(timezone=True)),
 )
