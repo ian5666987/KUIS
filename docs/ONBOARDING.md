@@ -239,7 +239,7 @@ docker/                — django / fastapi / worker Dockerfiles
 ### Models (`main/models.py`)
 
 **Core**
-- **`Document`**: `title`, `content` (raw XML/text), `uploaded_at`, `created_at`, `user` (FK→`User`, nullable, **`CASCADE`** — the reason account deletion is soft, §2), `token_count`, `token_count_corrected`, `status` (`ready`|`indexing`|`failed`), `content_hash` (**unique**, migration `0010`), `tokenized_hash`, `tokenizer_version`. Index on `(user, uploaded_at)`.
+- **`Document`**: `title`, `content` (raw XML/text), `uploaded_at`, `created_at`, `user` (FK→`User`, nullable, **`CASCADE`** — the reason account deletion is soft, §2), `token_count`, `token_count_corrected`, `status` (`ready`|`indexing`|`failed`, **defaults to `indexing`** — a row exists before its tokens do; only `worker/tasks/indexing.py` ever moves it), `status_reason`/`status_detail` (why a `failed` document failed — a stable code from `main/corpus_parsing.py`'s `REASON_*` plus the sentence to show; both empty otherwise, migration `0016`), `content_hash` (**unique**, migration `0010`), `tokenized_hash`, `tokenizer_version`. Index on `(user, uploaded_at)`.
 - **`Corpus`**: `name` (unique), `description`, `created_by` (FK→`User`, `SET_NULL`), `created_at`, `is_public` (`default=True`), and **`documents = ManyToManyField(Document, related_name='corpora')`**. The M2M is deliberate — a file may belong to several corpora, and the client has accepted that overlap.
 
 **Tier 1 / Tier 2 — the indexed read path (migrations `0007`–`0009`)**

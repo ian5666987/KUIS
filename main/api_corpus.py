@@ -93,6 +93,11 @@ class CorpusDetailSerializer(CorpusSerializer):
                 "token_count": doc.token_count,
                 "token_count_corrected": doc.token_count_corrected,
                 "status": doc.status,
+                # Empty unless status is 'failed' — the corpus detail table is
+                # where a failed file is actually looked at, so the reason
+                # travels with it rather than needing a per-document fetch.
+                "status_reason": doc.status_reason,
+                "status_detail": doc.status_detail,
             }
             for doc in obj.documents.order_by("title")
         ]

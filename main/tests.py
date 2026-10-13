@@ -690,7 +690,7 @@ class WorkerTaskTests(TestCase):
 
     def test_index_document_builds_tokens_and_marks_ready(self):
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
-        self.assertEqual(doc.status, Document.STATUS_READY)  # model default, not yet indexed
+        self.assertEqual(doc.status, Document.STATUS_INDEXING)  # model default, not yet indexed
         self.assertEqual(doc.tokens.count(), 0)
 
         index_document(doc.id)
@@ -750,6 +750,107 @@ class WorkerTaskTests(TestCase):
 
         ngrams = DocumentNgram.objects.filter(document=doc, mode='original', n=2)
         self.assertTrue(ngrams.exists())
+
+    def test_unindexed_document_never_reports_itself_ready(self):
+        """The regression this whole status mechanism exists for: a Document
+        row exists as soon as the upload is accepted, but if the Celery worker
+        isn't consuming the queue, index_document never runs against it. Under
+        the old 'ready' default that document sat in the corpus table with a
+        green Ready badge next to 0 tokens, indistinguishable from a real
+        one."""
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+
+        self.assertEqual(doc.status, Document.STATUS_INDEXING)
+        self.assertEqual(doc.token_count, 0)
+        self.assertIsNone(doc.tokenizer_version)
+
+    def test_malformed_xml_fails_instead_of_tokenizing_its_own_markup(self):
+        # Unescaped '&' — the single most common breakage in a real export.
+        # parse_document falls back to flat tokenization here, which would
+        # otherwise report a healthy token count built from the tag names.
+        broken = CORPUS_XML.replace('saya suka', 'saya & suka')
+        doc = Document.objects.create(title='broken.xml', content=broken)
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_FAILED)
+        self.assertEqual(doc.status_reason, 'xml_malformed')
+        self.assertIn('line', doc.status_detail)  # ET's own line/column survives
+        self.assertIn('&amp;', doc.status_detail)  # the common-cause hint
+        self.assertEqual(doc.token_count, 0)
+        self.assertFalse(doc.tokens.exists())
+
+    def test_xml_without_body_fails_with_its_own_reason(self):
+        doc = Document.objects.create(
+            title='nobody.xml',
+            content="<document><header><lang>indonesian</lang></header></document>",
+        )
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_FAILED)
+        self.assertEqual(doc.status_reason, 'xml_no_body')
+        self.assertIn('<header>', doc.status_detail)  # says what it found instead
+
+    def test_empty_file_fails_with_its_own_reason(self):
+        doc = Document.objects.create(title='empty.xml', content='   \n  ')
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_FAILED)
+        self.assertEqual(doc.status_reason, 'empty_content')
+
+    def test_parseable_xml_that_yields_no_words_fails(self):
+        doc = Document.objects.create(
+            title='blank-body.xml',
+            content="<document><header><lang>indonesian</lang></header><body>   </body></document>",
+        )
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_FAILED)
+        self.assertEqual(doc.status_reason, 'no_tokens')
+
+    def test_plain_text_is_not_treated_as_broken_xml(self):
+        """The flat tokenizer is the CORRECT reading of a genuine .txt upload,
+        not a fallback hiding a problem — only content that is evidently meant
+        to be XML is held to the XML rules."""
+        doc = Document.objects.create(title='notes.txt', content=PLAIN_TEXT)
+
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertEqual(doc.status_reason, '')
+        self.assertEqual(doc.token_count, len(PLAIN_TEXT.split()))
+
+    def test_successful_reindex_clears_a_previous_failure(self):
+        doc = Document.objects.create(title='t.xml', content='<document></document>')
+        index_document(doc.id)
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_FAILED)
+
+        doc.content = CORPUS_XML
+        doc.save(update_fields=['content'])
+        index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertEqual(doc.status_reason, '')
+        self.assertEqual(doc.status_detail, '')
+
+    def test_failed_document_skips_the_aggregate_tasks(self):
+        from .models import DocumentNgram, DocumentWordFreq
+
+        doc = Document.objects.create(title='empty.xml', content='')
+        index_document(doc.id)
+
+        self.assertFalse(DocumentWordFreq.objects.filter(document=doc).exists())
+        self.assertFalse(DocumentNgram.objects.filter(document=doc).exists())
 
     def test_runs_synchronously_end_to_end_via_delay(self):
         # This is the one test in the file that goes through .delay() itself

@@ -21,6 +21,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            '--unindexed-only',
+            action='store_true',
+            help=(
+                "Only process documents the indexing task never completed "
+                "against (tokenizer_version IS NULL) — the recovery path for "
+                "uploads that landed while no Celery worker was consuming the "
+                "queue, which main/migrations/0016_document_status_honesty.py "
+                "flags as failed/never_indexed. Avoids re-tokenizing the whole "
+                "corpus just to repair a handful of rows."
+            ),
+        )
+        parser.add_argument(
             '--dry-run',
             action='store_true',
             help=(
@@ -47,17 +59,34 @@ class Command(BaseCommand):
         # command; there's no reason to introduce async dispatch (and a
         # dependency on a separately-running worker process) just to
         # retokenize from the command line.
-        document_ids = list(Document.objects.values_list('id', flat=True))
+        documents = Document.objects.all()
+        if options['unindexed_only']:
+            documents = documents.filter(tokenizer_version__isnull=True)
+
+        document_ids = list(documents.values_list('id', flat=True))
         total = len(document_ids)
+
+        if not total:
+            self.stdout.write(self.style.SUCCESS('Nothing to retokenize.'))
+            return
 
         for i, document_id in enumerate(document_ids, start=1):
             index_document(document_id)
             document = Document.objects.get(id=document_id)
 
-            self.stdout.write(
-                f"[{i}/{total}] {document.title}: "
-                f"{document.token_count} original tokens, {document.token_count_corrected} corrected tokens"
-            )
+            if document.status == Document.STATUS_FAILED:
+                # index_document records why rather than raising for a content
+                # problem, so report it here instead of printing "0 tokens" and
+                # letting it read as success.
+                self.stdout.write(self.style.WARNING(
+                    f"[{i}/{total}] {document.title}: FAILED "
+                    f"({document.status_reason}) — {document.status_detail}"
+                ))
+            else:
+                self.stdout.write(
+                    f"[{i}/{total}] {document.title}: "
+                    f"{document.token_count} original tokens, {document.token_count_corrected} corrected tokens"
+                )
 
         self.stdout.write(self.style.SUCCESS(f"Retokenized {total} document(s)."))
 

@@ -30,7 +30,27 @@ class Document(models.Model):
     # (worker/tasks/indexing.py), replacing the synchronous post_save signal
     # this model used to build tokens with. Existing documents backfilled to
     # 'ready' by main/management/commands/backfill_tier2.py.
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_READY)
+    # Defaults to 'indexing', NOT 'ready': a Document row exists from the
+    # moment the upload is accepted, but its tokens don't exist until
+    # worker/tasks/indexing.py::index_document has run against it. The old
+    # 'ready' default meant a document reported itself fully indexed the
+    # instant it was inserted — before the task was even enqueued, and
+    # permanently so if the Celery worker wasn't running to consume it, which
+    # is exactly how a 0-token file came to show a green "Ready" badge in the
+    # corpus detail page. Nothing filters on this field (it is display-only),
+    # so no query's meaning changes with the default; only the honesty of
+    # what's displayed does.
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_INDEXING)
+
+    # Why a document is in the status it's in — set together with `status` and
+    # only meaningful for STATUS_FAILED, where status_reason is one of
+    # main/corpus_parsing.py's REASON_* codes (a stable identifier the UI can
+    # key off) and status_detail is the human-readable sentence to show,
+    # including specifics like an XML parse error's line/column. Both are
+    # cleared on every successful index, so a document that failed once and
+    # was fixed doesn't keep showing a stale explanation.
+    status_reason = models.CharField(max_length=32, blank=True, default='')
+    status_detail = models.TextField(blank=True, default='')
 
     # Integrity/reproducibility placeholders (optimisation_plan.md §5).
     # content_hash now doubles as the upload-time dedup key (see

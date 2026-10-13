@@ -85,6 +85,11 @@ class DocumentSerializer(serializers.ModelSerializer):
             "token_count",
             "token_count_corrected",
             "status",
+            # Empty unless `status` is 'failed'. status_reason is a stable code
+            # (main/corpus_parsing.py's REASON_*), status_detail the sentence
+            # to show the user — see worker/tasks/indexing.py.
+            "status_reason",
+            "status_detail",
             "corpus_count",
             "metadata",
         ]

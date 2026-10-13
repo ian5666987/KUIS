@@ -12,7 +12,8 @@ introspection (`Model._meta.db_table` / `Field.column`), not guessed:
     Document          -> main_document          (id, title, content, uploaded_at,
                                                    user_id, token_count,
                                                    token_count_corrected, created_at,
-                                                   status, content_hash, tokenized_hash,
+                                                   status, status_reason, status_detail,
+                                                   content_hash, tokenized_hash,
                                                    tokenizer_version)
     Corpus            -> main_corpus            (id, name, description, created_by_id, created_at)
     Token             -> main_token             (id, document_id, word_type_id, position, mode)
@@ -68,6 +69,8 @@ document = Table(
     Column("token_count_corrected", Integer),
     Column("created_at", DateTime(timezone=True)),
     Column("status", String(10)),
+    Column("status_reason", String(32)),
+    Column("status_detail", Text),
     Column("content_hash", String(64), nullable=True),
     Column("tokenized_hash", String(64), nullable=True),
     Column("tokenizer_version", Integer, nullable=True),

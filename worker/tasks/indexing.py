@@ -10,8 +10,19 @@ Chains into the two aggregate tasks (worker/tasks/aggregates.py) so
 Document.status only reaches 'ready' once tokens AND Tier-2 aggregates both
 exist — a caller polling status sees either 'indexing' or a fully-usable
 'ready' document, never a half-finished state.
+
+This task is the ONLY writer of Document.status/status_reason/status_detail.
+A document that never reaches it stays at the model's 'indexing' default
+forever, which is the truthful reading of "the worker hasn't touched this" —
+and the reason that default is no longer 'ready' (see main/models.py).
 """
 
+from main.corpus_parsing import (
+    REASON_MESSAGES,
+    REASON_NO_TOKENS,
+    REASON_WORKER_ERROR,
+    diagnose_content,
+)
 from main.document_ingest import compute_content_hash
 from main.models import Document, Token, build_tokens
 from worker.celery_app import app
@@ -26,11 +37,35 @@ from worker.tasks.error_annotations import extract_document_error_annotations
 TOKENIZER_VERSION = 1
 
 
+def _mark_failed(document: Document, reason: str, detail: str) -> None:
+    """Records WHY a document couldn't be indexed, alongside the token counts
+    the failure leaves behind (zero — the Token rows were deleted at the top of
+    index_document and nothing replaced them). Writing the counts here matters:
+    a document that previously indexed fine and now fails must not keep
+    advertising its old counts next to a Failed badge."""
+    document.status = Document.STATUS_FAILED
+    document.status_reason = reason
+    document.status_detail = detail
+    document.token_count = 0
+    document.token_count_corrected = 0
+    document.save(
+        update_fields=[
+            "status",
+            "status_reason",
+            "status_detail",
+            "token_count",
+            "token_count_corrected",
+        ]
+    )
+
+
 @app.task
 def index_document(document_id: int) -> int:
     document = Document.objects.get(id=document_id)
     document.status = Document.STATUS_INDEXING
-    document.save(update_fields=["status"])
+    document.status_reason = ""
+    document.status_detail = ""
+    document.save(update_fields=["status", "status_reason", "status_detail"])
 
     try:
         # Re-indexing (content edited, or a re-run) must not double up —
@@ -38,8 +73,26 @@ def index_document(document_id: int) -> int:
         # already does for the same reason.
         Token.objects.filter(document=document).delete()
 
+        # Structural check BEFORE tokenizing. main/corpus_parsing.py's
+        # parse_document falls back to flat tokenization for anything it can't
+        # parse as corpus XML, which silently turns a malformed export's own
+        # markup into "words" — a healthy-looking token count over nonsense.
+        # Failing here is what makes that case visible instead.
+        reason, detail = diagnose_content(document.content, document.title)
+        if reason:
+            _mark_failed(document, reason, detail)
+            return document_id
+
         content_hash = compute_content_hash(document.content)
         token_count, token_count_corrected = build_tokens(document)
+
+        # Parsed cleanly and still produced nothing — e.g. a <body> containing
+        # only whitespace or only empty elements. Not a crash, but not a
+        # usable document either, and a 0-token 'ready' document is precisely
+        # the state this whole status/reason mechanism exists to surface.
+        if token_count == 0:
+            _mark_failed(document, REASON_NO_TOKENS, REASON_MESSAGES[REASON_NO_TOKENS])
+            return document_id
 
         document.token_count = token_count
         document.token_count_corrected = token_count_corrected
@@ -55,6 +108,8 @@ def index_document(document_id: int) -> int:
         document.tokenized_hash = content_hash
         document.tokenizer_version = TOKENIZER_VERSION
         document.status = Document.STATUS_READY
+        document.status_reason = ""
+        document.status_detail = ""
         document.save(
             update_fields=[
                 "token_count",
@@ -63,11 +118,20 @@ def index_document(document_id: int) -> int:
                 "tokenized_hash",
                 "tokenizer_version",
                 "status",
+                "status_reason",
+                "status_detail",
             ]
         )
-    except Exception:
-        document.status = Document.STATUS_FAILED
-        document.save(update_fields=["status"])
+    except Exception as error:
+        # Keep the exception's own text: an unexpected failure is the one case
+        # where there is no pre-written explanation, and the type/message is
+        # what an operator needs to act on. The raise is preserved so Celery
+        # still records the task as failed with its traceback.
+        _mark_failed(
+            document,
+            REASON_WORKER_ERROR,
+            f"{REASON_MESSAGES[REASON_WORKER_ERROR]} ({type(error).__name__}: {error})",
+        )
         raise
 
     # Fire-and-forget under a real broker; synchronous under
