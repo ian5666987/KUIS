@@ -1,6 +1,6 @@
 # Author (person-level) metadata + author filter facets
 
-**Status: ✅ Shipped (backend).** Migration `0015`; `metadata/authors/*.csv` tracked. **Not yet applied or loaded on `corpus_db`** — same state as `0014`, see **Loading** below. KUIS-FE controls for the two new facets are not built yet; the Django surface renders them.
+**Status: ✅ Shipped (backend).** Migration `0015` creates `Author` + `AuthorMotherTongue` only; `metadata/authors/*.csv` tracked. Of the source's 20 columns, **4 are read and 2 are stored** — see **Why only two facets**. **Not yet applied or loaded on `corpus_db`** — same state as `0014`, see **Loading** below. KUIS-FE controls for the two new facets are not built yet; the Django surface renders them.
 
 Companion to `docs/metadata-catalogue-plan.md`, which covers the *file*-level catalogue and the filter mechanism this feature extends. Matching rules: `docs/metadata-matching.md`.
 
@@ -10,7 +10,7 @@ The catalogue answers *about the file* — university, year, grade, topic. It ca
 
 Three new CSVs supply that: `metadata/authors/{KUIS,OU,TUFS}.csv`, 20 columns, **one row per person per survey occasion** — a different grain from the catalogue's one-row-per-file. 439 rows describing 235 people.
 
-Two of those traits ship as filter facets — **gender** and **mother tongue**. Grade already shipped with the catalogue at 100% coverage. The rest are imported and stored but deliberately not filterable; see **Why only two facets**.
+Two of those traits ship as filter facets — **gender** and **mother tongue**. Grade already shipped with the catalogue at 100% coverage. The rest are **not imported at all**; see **Why only two facets**.
 
 ## Shape of the source data
 
@@ -48,7 +48,11 @@ Facet counts, weighted by file:
 
 **- `Osaka` maps to `OU`, and an unmapped university is an error.** The surveys spell the university out; the catalogue uses the filename prefix. `UNIVERSITY_ALIASES` reconciles them. An unrecognised value **skips the row and exits non-zero** rather than passing through: an author under an unknown university can never link to a file and would contribute nothing to any facet — a failure with no symptom.
 
-**- Two tables for two grains: `Author` holds only what is invariant, `AuthorSurvey` holds every occasion.** A person is surveyed up to six times. Putting a per-occasion value on `Author` would mean choosing one arbitrarily; putting an invariant on `AuthorSurvey` would mean six copies to keep in step. So `Author` carries gender and the mother-tongue set, and all 20 source columns live on `AuthorSurvey`, one row per occasion.
+**- Only the two traits the filter exposes are stored at all.** `Author` carries gender, `AuthorMotherTongue` carries the tongues, and the source CSVs' other sixteen columns are read past during import and dropped.
+
+An earlier revision of this feature kept every column in a third table, `AuthorSurvey`, one row per survey occasion, on the reasoning that it preserved the data for a future facet. That was wrong twice over, and the table was removed before the feature shipped. Nothing ever read it — not a view, a serializer, a facet or a repository query — so it was purely a second copy of the CSV, free to drift from the first with no test able to notice. And the "future facet" argument doesn't hold either: the CSVs are the authority and are tracked in git, so if the client settles a rule for age or duration, re-importing is the entire cost of getting the data back. Storing it unread bought nothing and cost a table, a mirror, three drift registrations and ~130 lines of importer.
+
+A person is still surveyed up to six times, and those rows are still grouped in memory during import — that is how the gender conflict is detected and how the mother-tongue union is taken. They are just never persisted per-occasion.
 
 **- Mother tongue is a child table, not a column.** A person can have more than one (`TUFS/NEGSEI` has Japanese and Malay), so `AuthorMotherTongue` holds one row per tongue and "mother tongue is Japanese or Malay" is a membership test. Cells are split on `[、・,，/&;]` after NFKC normalisation — the source really does use the ideographic comma, the katakana middle dot and the ASCII comma, sometimes in one file.
 
@@ -88,7 +92,7 @@ Age carries exactly the same ambiguity as duration — the birthday falls betwee
 
 `Major` is worth its own note: KUIS and OU record a **language** (`Indonesian`), TUFS records a **faculty** (`School of International and Area Studies, Oceania`). Filtering on it would behave differently per university. It needs a controlled vocabulary from the client before it can be a facet.
 
-All of these are **imported and stored** on `AuthorSurvey`. Promoting any of them later needs only a rule from the client for which survey occasion applies to a file, plus a facet registration — not a re-import.
+None of these are stored. Promoting one later needs a rule from the client for which survey occasion applies to a file, a column, a facet registration — and a re-import, which is a single idempotent command over CSVs that are already in git. See the second key decision above for why storing them unread was not the cheaper option it looked like.
 
 ## Inconsistent source data — for the data owner
 
@@ -145,7 +149,9 @@ python manage.py load_author_metadata
 
 Either import order converges — `load_author_metadata --relink` re-resolves links for rows that arrived later, mirroring `load_metadata_catalogue --relink`. Both commands are idempotent and upsert rather than replace, because `Author` rows carry resolved document links a delete-and-recreate would discard. Mother tongues are the exception: they are **replaced** per author on each import, so a tongue the client removes at source actually disappears.
 
-Expected on the current data: **235 authors, 439 surveys, 226 mother-tongue rows, 733 linked files**, 1 error, 8 warnings, exit code 1.
+Expected on the current data: **235 authors, 226 mother-tongue rows, 733 linked files** from 439 CSV rows, with **1 error and 1 warning**, exit code 1.
+
+(The error count was 1 and the warnings 8 while durations and dates were still parsed. Six of those warnings were about columns that are no longer imported — a malformed duration in a column nothing queries is not something to ask the data owner to fix.)
 
 `--dry-run` writes nothing but still derives and reports, which is where the error list above comes from.
 
@@ -155,7 +161,7 @@ Expected on the current data: **235 authors, 439 surveys, 226 mother-tongue rows
 
 | Concern | File |
 |---|---|
-| Models | `main/models.py` — `Author`, `AuthorMotherTongue`, `AuthorSurvey`, `DocumentMetadata.author` |
+| Models | `main/models.py` — `Author`, `AuthorMotherTongue`, `DocumentMetadata.author` |
 | Migration | `main/migrations/0015_author_metadata.py` |
 | Parsing, normalisation, linking | `main/author_metadata.py` |
 | Command | `main/management/commands/load_author_metadata.py` |
@@ -171,9 +177,8 @@ Adding a third author facet is: one entry in `FACET_FIELDS` + `FACET_ORM_PATHS`,
 
 ## Explicitly deferred
 
-- **Age, duration of learning, difficulty, proficiency, place/duration of stay, major as facets.** Stored, not filterable. Each needs a client decision — a survey-resolution rule for the first three, a controlled vocabulary for `Major`.
-- **A `DocumentMetadata.author_survey` FK.** Would force exactly the resolution decision above. Nothing needs it yet.
-- **Multi-valued `place_of_stay`.** Same child-table shape as mother tongue would work, but the vocabulary needs normalising first (36 variants, three separators, mixed granularity — `Jakarta` vs `Jakarta, Cilandak` vs `Java`).
+- **Age, duration of learning, difficulty, proficiency, place/duration of stay, major as facets.** Not imported. Each needs a client decision first — a rule for which survey occasion applies to a file for the first three, a controlled vocabulary for `Major`, a normalised place list for the fourth (36 variants, three separators, mixed granularity: `Jakarta` vs `Jakarta, Cilandak` vs `Java`). Adding one is then a column, an entry in `AUTHOR_CSV_FIELD_MAP`, a facet registration, and a re-import.
+- **Per-occasion storage of any kind.** A person's survey rows are grouped in memory during import — enough to detect a gender conflict and union the tongues — and discarded. Reinstating a per-occasion table only makes sense alongside a facet that actually needs one; see the second key decision above for why doing it speculatively was a mistake the first time.
 - **A filename parser.** Verified to agree with the columns in 100% of rows, so it would only ever serve as a regression guard on future catalogue exports. Kept out of the match path.
 - **An admin CSV upload endpoint.** `import_author_rows` is already split out from the command for it, same as `import_catalogue_rows`; an upload path still needs the `utf-8-sig`/CRLF handling `decode_uploaded_file` lacks.
 - **Refactoring the filter core to a generic facet registry.** Five facets now enumerate themselves in roughly a dozen places across two surfaces. Worth doing — but not in the same change that added the first cross-table facet. Revisit when a sixth is requested.

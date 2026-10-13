@@ -16,7 +16,24 @@ Keeping them apart is also what unbroke the catalogue loader. Its
 first). metadata/authors/ is load-bearing, not cosmetic — see
 main/tests.py::test_only_catalogue_schema_csvs_live_directly_in_metadata.
 
-Three rules run through everything here:
+**Only two traits are imported: gender and mother tongue.** The source CSVs
+carry 20 columns; the other sixteen are read past and dropped. Two reasons,
+and the first is the decisive one:
+
+  * Nothing reads them. Storing a column no query touches is just a second
+    copy of the CSV that can drift from the first.
+  * Most of them *cannot* be attached to a file anyway. A person is surveyed
+    twice per academic year and a filename records only year and grade, never
+    which survey, so age, learning duration and the difficulty self-rating
+    have no single honest value per file. `Major` is worse: KUIS and OU record
+    a language, TUFS a faculty.
+
+The CSVs are the authority and are tracked in git, so if the client later
+settles a rule for one of those traits, re-importing is the entire cost of
+getting it back. That is why dropping them is cheap and keeping them unread
+was not.
+
+Three rules run through what remains:
 
   * **The join key is (university, name_code), never name_code alone.**
     name_code collides across universities in the real catalogue — RAKA is
@@ -24,61 +41,42 @@ Three rules run through everything here:
     and five of those collisions have survey data under exactly one side. A
     one-sided key hands 8 real files another person's demographics.
 
-  * **Never destroy a source value.** Every normalised field is stored as a
-    pair: the raw string verbatim plus the parsed form, NULL when it doesn't
-    parse. Three duration cells and two dates genuinely don't parse; the
-    client corrects those at source, so the CSV has to stay reconstructible
-    from the database.
+  * **Never destroy a source value.** What is imported is stored raw as well
+    as normalised (gender_raw, tongue_raw), so a normalisation bug stays
+    traceable to what the CSV actually said.
 
-  * **Never invent one either.** A conflict between a person's surveys
+  * **Never invent one either.** A conflict between a person's survey rows
     resolves to NULL plus a report, not to a winner picked by row order. The
-    one exception is mother tongue, where the UNION across surveys is taken —
+    one exception is mother tongue, where the UNION across rows is taken —
     which invents nothing, because every tongue in the union was asserted by
-    some survey of that person.
+    some row for that person.
 """
 
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal
 
 from django.db import transaction
 
 from .metadata_catalogue import normalize_header
-from .models import Author, AuthorMotherTongue, AuthorSurvey, DocumentMetadata
+from .models import Author, AuthorMotherTongue, DocumentMetadata
 
-# CSV header (normalize_header'd) -> what we do with it. Reuses
+# CSV header (normalize_header'd) -> what we keep. Reuses
 # metadata_catalogue.normalize_header so a re-export that changes
 # capitalisation or spacing doesn't silently drop a column, exactly as the
 # catalogue importer guarantees.
+#
+# Four entries out of the source's twenty columns. Unmapped headers are read
+# past in silence, which is the same thing import_catalogue_rows does — a
+# column the model has no home for is not an error.
 AUTHOR_CSV_FIELD_MAP = {
     'name code': 'name_code',
-    'date': 'survey_date_raw',
     'university': 'university',
-    'age': 'age',
     'gender': 'gender',
-    'grade': 'grade',
-    'major': 'major',
     'mother tongues': 'mother_tongues_raw',
-    'duration of learning indonesian': 'duration_learning_raw',
-    'other foreign language (1)': 'other_fl_1',
-    'duration of learning other fl (1)': 'duration_fl_1_raw',
-    'other foreign language (2)': 'other_fl_2',
-    'duration of learning other fl (2)': 'duration_fl_2_raw',
-    'indonesian language proficiency test level': 'proficiency_level',
-    'test month and year': 'test_month_year',
-    'place of staying in indonesia': 'place_of_stay',
-    'duration of staying in indonesia': 'duration_of_stay_raw',
-    'difficulty level of writing essays in indonesian '
-    '(1=very easy~5=very difficult)': 'difficulty_level',
-    'reasons': 'reasons',
-    'reasons (translated into english)': 'reasons_en',
 }
 
 REQUIRED_CSV_HEADERS = ('name code', 'university')
-
-INTEGER_FIELDS = ('age', 'grade', 'difficulty_level')
 
 # The survey CSVs spell Osaka out; the catalogue uses the filename prefix.
 # An unmapped university is an ERROR rather than a pass-through: it would
@@ -91,111 +89,28 @@ UNIVERSITY_ALIASES = {
     'ou': 'OU',
 }
 
-# Mother tongues and places are multi-valued in the source with no single
-# separator: the ideographic comma, the katakana middle dot and the ASCII
-# comma all appear, sometimes in the same file.
+# Mother tongues are multi-valued in the source with no single separator: the
+# ideographic comma, the katakana middle dot and the ASCII comma all appear,
+# sometimes in the same file.
 MULTI_VALUE_SPLIT = re.compile(r'[、・,，/&;]+')
-
-# Durations are written as "1 year(s)3 month(s)", "20 month(s)", "2 week(s)",
-# "5 day(s)" — summed, so the compound forms work without a second pattern.
-_DURATION_TOKEN = re.compile(r'(\d+(?:\.\d+)?)\s*(year|month|week|day)\(s\)')
-_MONTHS_PER = {
-    'year': Decimal('12'),
-    'month': Decimal('1'),
-    # Mean weeks/days per month rather than 4 and 30: these feed numeric
-    # comparisons, and "1 week" vs "0.25 month" shouldn't disagree by 2 days.
-    'week': Decimal('1') / Decimal('4.345'),
-    'day': Decimal('1') / Decimal('30.44'),
-}
-
-_DATE_WITH_YEAR = re.compile(r'^(\d{4})/(\d{1,2})/(\d{1,2})$')
-
-# Japanese academic year starts in April, so a January 2024 survey describes
-# academic year 2023 — which is the year a 2023 filename refers to.
-ACADEMIC_YEAR_START_MONTH = 4
 
 
 def normalize_text(value):
     """NFKC-normalise and collapse whitespace.
 
-    NFKC is what folds the full-width digits the source really contains
-    ('１ year(s)', '0.５ month(s)') into ASCII so one numeric pattern handles
-    them, and collapsing runs of spaces handles '1  month(s)'.
+    NFKC folds the full-width characters the source really contains into
+    ASCII, and collapsing runs of spaces handles the stray double spaces a
+    hand-edited spreadsheet leaves behind.
     """
     text = unicodedata.normalize('NFKC', str(value or ''))
     return ' '.join(text.split()).strip()
-
-
-def parse_duration_to_months(value):
-    """A duration string -> (months as a Decimal or None, note or None).
-
-    Returns a note rather than just a number because a PARTIAL parse is the
-    dangerous case. '2、3 year(s)' means "two or three years"; matching only
-    the '3 year(s)' and returning 36 would be a silent guess dressed up as
-    data. So anything left over after the recognised tokens is inspected:
-
-      * leftover containing a digit -> the value is ambiguous or written in
-        another notation ('2カ月', '8ヵ月'). months is None, and the raw
-        string is kept for the client to fix at source.
-      * leftover with no digit -> a qualifier, in practice always '約'
-        ("approximately"). The number is right, so it is kept; the note just
-        records that the hedge was dropped.
-
-    Never raises: one bad cell must not cost a whole person's record.
-    """
-    text = normalize_text(value)
-    if not text:
-        return None, None
-
-    tokens = _DURATION_TOKEN.findall(text)
-    if not tokens:
-        return None, 'no recognised duration'
-
-    residue = _DURATION_TOKEN.sub('', text).strip()
-    if residue and any(character.isdigit() for character in residue):
-        return None, f'ambiguous — {residue!r} left unparsed'
-
-    total = sum(
-        (Decimal(amount) * _MONTHS_PER[unit] for amount, unit in tokens),
-        Decimal('0'),
-    )
-    months = total.quantize(Decimal('0.01'))
-
-    if residue:
-        return months, f'ignored qualifier {residue!r}'
-    return months, None
-
-
-def parse_survey_date(value):
-    """'2024/1/10' -> (date(2024, 1, 10), academic_year).
-
-    Returns (None, None) for a blank cell and for the two rows written
-    '11/27' with no year — a bare month/day can't be placed in an academic
-    year, and inferring one from the file it sits in would be a guess.
-    """
-    text = normalize_text(value)
-    if not text:
-        return None, None
-
-    match = _DATE_WITH_YEAR.match(text)
-    if not match:
-        return None, None
-
-    year, month, day = (int(g) for g in match.groups())
-    try:
-        parsed = date(year, month, day)
-    except ValueError:
-        return None, None
-
-    academic_year = year if month >= ACADEMIC_YEAR_START_MONTH else year - 1
-    return parsed, academic_year
 
 
 def split_mother_tongues(value):
     """A 'Mother tongues' cell -> the set of tongues it names.
 
     A set, not a list: the only thing downstream cares about is membership,
-    and the union across a person's surveys is a set union.
+    and the union across a person's rows is a set union.
     """
     text = normalize_text(value)
     if not text:
@@ -210,14 +125,18 @@ class AuthorImportReport:
     The validation report IS the deliverable here, not a side effect: the
     client owns the CSVs and corrects them at source
     (docs/author-metadata-plan.md), so an inconsistency that never gets named
-    never gets fixed. `errors` block a value from being used, `warnings` don't.
+    never gets fixed. `errors` mean a value could not be used; `warnings` mean
+    it was imported with a caveat.
+
+    Scoped to the two traits actually imported. A malformed duration or a
+    year-less date is no longer reported, because nothing reads those columns
+    — reporting them would be asking the client to fix data the system has no
+    opinion about.
     """
 
     rows_read: int = 0
     authors_created: int = 0
     authors_updated: int = 0
-    surveys_created: int = 0
-    surveys_updated: int = 0
     tongues_written: int = 0
     linked: int = 0
 
@@ -239,8 +158,8 @@ def _coerce_row(raw, line_number, source_file, report):
     """One CSV row -> a field dict, or None when it can't be used at all.
 
     Only a missing name code or an unrecognised university makes a row
-    unusable; everything else degrades to NULL with the raw string kept, so
-    one bad cell never costs a whole person's record.
+    unusable. A blank gender or mother tongue is a legitimate "not recorded"
+    and imports as such.
     """
     values = {}
     for header, value in (raw or {}).items():
@@ -269,60 +188,22 @@ def _coerce_row(raw, line_number, source_file, report):
         return None
     values['university'] = university
 
-    where = f'{source_file} {university}/{name_code}'
-
-    for name in INTEGER_FIELDS:
-        text = normalize_text(values.get(name, ''))
-        if not text:
-            values[name] = None
-            continue
-        try:
-            values[name] = int(text)
-        except ValueError:
-            values[name] = None
-            report.warnings.append((where, f'{name} {text!r} is not a number -> NULL'))
-
-    survey_date, academic_year = parse_survey_date(values.get('survey_date_raw', ''))
-    values['survey_date'] = survey_date
-    values['academic_year'] = academic_year
-    if values.get('survey_date_raw') and survey_date is None:
-        report.warnings.append((
-            where,
-            f'date {values["survey_date_raw"]!r} has no usable year -> NULL '
-            f'(it cannot be placed in an academic year)',
-        ))
-
-    for raw_field, months_field in (
-        ('duration_learning_raw', 'duration_learning_months'),
-        ('duration_fl_1_raw', 'duration_fl_1_months'),
-        ('duration_fl_2_raw', 'duration_fl_2_months'),
-        ('duration_of_stay_raw', 'duration_of_stay_months'),
-    ):
-        text = values.get(raw_field, '')
-        months, note = parse_duration_to_months(text)
-        values[months_field] = months
-        if text and note:
-            outcome = 'months NULL' if months is None else f'read as {months} month(s)'
-            report.warnings.append((
-                where, f'{raw_field} {text!r}: {note} -> {outcome}',
-            ))
-
     values['mother_tongues'] = split_mother_tongues(values.get('mother_tongues_raw', ''))
     values['_line'] = line_number
     return values
 
 
 def derive_invariants(rows, where, report):
-    """The person-level facts, from all of that person's survey rows.
+    """The person-level facts, from all of that person's rows.
 
     Gender is single-valued, so disagreement resolves to NULL: there is no
     non-arbitrary winner between 'Female' and 'Male', and a filter quietly
     believing the wrong one is worse than it admitting it doesn't know.
 
-    Mother tongue is the UNION, and keeps every value even when the surveys
-    disagree. Union invents nothing — each tongue was asserted by some survey
-    of this person — and NULLing on disagreement would have cost the Malay
-    facet all 21 of its files over one inconsistent row.
+    Mother tongue is the UNION, and keeps every value even when the rows
+    disagree. Union invents nothing — each tongue was asserted by some row for
+    this person — and NULLing on disagreement would have cost the Malay facet
+    all 21 of its files over one inconsistent row.
     """
     genders = {r['gender'] for r in rows if r.get('gender')}
     gender = None
@@ -346,16 +227,20 @@ def derive_invariants(rows, where, report):
         conflicts.append(f'mother tongue sets differ: {shown} -> union')
         report.warnings.append((
             where,
-            f'mother tongue sets differ across surveys: {shown} '
+            f'mother tongue sets differ across rows: {shown} '
             f'-> imported as the union {{{", ".join(sorted(tongues))}}}',
         ))
 
     gender_raw = next((r.get('gender', '') for r in rows if r.get('gender')), '')
+    tongue_raw = next(
+        (r.get('mother_tongues_raw', '') for r in rows if r.get('mother_tongues_raw')), '',
+    )
 
     return {
         'gender': gender,
         'gender_raw': gender_raw,
         'mother_tongues': tongues,
+        'tongue_raw': tongue_raw,
         'has_conflict': bool(conflicts),
         'conflict_note': '; '.join(conflicts),
     }
@@ -367,7 +252,7 @@ def link_authors(universities=None):
     Mirrors metadata_catalogue.relink_entries, and exists for the same reason:
     the two sides arrive independently, so whichever lands second has to be
     able to resolve the link. Called at the end of an author import, and from
-    `load_metadata_catalogue --relink`, so either order converges.
+    `load_author_metadata --relink`, so either order converges.
 
     Matching on BOTH columns is the whole point — see the module docstring.
     `universities` narrows the scan when only some files were imported.
@@ -400,9 +285,11 @@ def import_author_rows(rows, source_file, dry_run=False):
     """Import one CSV's rows. Split out from the management command so an
     admin upload endpoint can reuse it, exactly as import_catalogue_rows is.
 
-    `rows` is any iterable of dicts (a csv.DictReader). Upserts rather than
-    replacing the table: Author rows carry resolved document links that a
-    delete-and-recreate would throw away.
+    `rows` is any iterable of dicts (a csv.DictReader). Several rows describe
+    the same person — one per survey occasion — so they are grouped first and
+    collapsed into one Author. Upserts rather than replacing the table:
+    Author rows carry resolved document links that a delete-and-recreate
+    would throw away.
     """
     report = AuthorImportReport()
 
@@ -418,14 +305,13 @@ def import_author_rows(rows, source_file, dry_run=False):
         by_person.setdefault((values['university'], values['name_code']), []).append(values)
 
     if dry_run:
-        # Still derive, so conflicts and unparseable values are reported by
-        # --dry-run. That is the mode the client's error list comes from.
+        # Still derive, so conflicts are reported by --dry-run. That is the
+        # mode the client's error list comes from.
         for (university, name_code), person_rows in sorted(by_person.items()):
             invariants = derive_invariants(
                 person_rows, f'{source_file} {university}/{name_code}', report,
             )
             report.tongues_written += len(invariants['mother_tongues'])
-            report.surveys_created += len(person_rows)
         report.authors_created = len(by_person)
         return report
 
@@ -451,7 +337,7 @@ def import_author_rows(rows, source_file, dry_run=False):
                 report.authors_updated += 1
 
             # Replace rather than merge: the CSV is the authority, so a tongue
-            # the client removed at source has to disappear here too. Safe to
+            # the client removes at source has to disappear here too. Safe to
             # delete because nothing points at these rows — the filter reads
             # them with EXISTS, never by id.
             author.mother_tongues.all().delete()
@@ -459,46 +345,11 @@ def import_author_rows(rows, source_file, dry_run=False):
                 AuthorMotherTongue(
                     author=author,
                     tongue=tongue,
-                    tongue_raw=person_rows[0].get('mother_tongues_raw', ''),
+                    tongue_raw=invariants['tongue_raw'],
                 )
                 for tongue in sorted(invariants['mother_tongues'])
             ])
             report.tongues_written += len(invariants['mother_tongues'])
-
-            for values in person_rows:
-                _, survey_created = AuthorSurvey.objects.update_or_create(
-                    author=author,
-                    survey_date_raw=values.get('survey_date_raw', ''),
-                    defaults={
-                        'survey_date': values['survey_date'],
-                        'academic_year': values['academic_year'],
-                        'age': values['age'],
-                        'grade': values['grade'],
-                        'major': values.get('major', ''),
-                        'mother_tongues_raw': values.get('mother_tongues_raw', ''),
-                        'duration_learning_raw': values.get('duration_learning_raw', ''),
-                        'duration_learning_months': values['duration_learning_months'],
-                        'other_fl_1': values.get('other_fl_1', ''),
-                        'duration_fl_1_raw': values.get('duration_fl_1_raw', ''),
-                        'duration_fl_1_months': values['duration_fl_1_months'],
-                        'other_fl_2': values.get('other_fl_2', ''),
-                        'duration_fl_2_raw': values.get('duration_fl_2_raw', ''),
-                        'duration_fl_2_months': values['duration_fl_2_months'],
-                        'proficiency_level': values.get('proficiency_level', ''),
-                        'test_month_year': values.get('test_month_year', ''),
-                        'place_of_stay': values.get('place_of_stay', ''),
-                        'duration_of_stay_raw': values.get('duration_of_stay_raw', ''),
-                        'duration_of_stay_months': values['duration_of_stay_months'],
-                        'difficulty_level': values['difficulty_level'],
-                        'reasons': values.get('reasons', ''),
-                        'reasons_en': values.get('reasons_en', ''),
-                        'source_file': source_file,
-                    },
-                )
-                if survey_created:
-                    report.surveys_created += 1
-                else:
-                    report.surveys_updated += 1
 
         report.linked = link_authors(
             universities={university for university, _ in by_person},

@@ -395,7 +395,9 @@ New: `main/metadata_catalogue.py` (neutral module — the match formula, the imp
 
 Full reasoning: **`docs/author-metadata-plan.md`**. What matters architecturally:
 
-**A second grain, so a second table — not more columns on `DocumentMetadata`.** The catalogue is one row per *file*; the survey CSVs are one row per *person per survey occasion* (439 rows, 235 people). `Author` holds only what is invariant for a person, `AuthorSurvey` holds all 20 source columns per occasion, and `DocumentMetadata` gains a nullable `author` FK (migration `0015`).
+**A second grain, so a second table — not more columns on `DocumentMetadata`.** The catalogue is one row per *file*; the survey CSVs are one row per *person per survey occasion* (439 rows, 235 people). `Author` holds the person, `AuthorMotherTongue` the multi-valued tongue, and `DocumentMetadata` gains a nullable `author` FK (migration `0015`).
+
+**Store only what something reads.** Only gender and mother tongue are imported; the source's other sixteen columns are read past. A third table holding every column per occasion (`AuthorSurvey`) was built and then removed before shipping: nothing read it, so it was a second copy of the CSV free to drift from the first, and the "keep it for a future facet" argument fails because the CSVs are the authority, are tracked in git, and re-importing is one idempotent command. It cost a table, a mirror, three drift registrations and ~130 lines of importer to store data no query touched.
 
 **The join key is `(university, name_code)`, and that is a correctness requirement.** `name_code` collides across universities in the real catalogue — seven codes appear under two universities, five of them with survey data on one side only — so a `name_code`-only match would give 8 real files another person's demographics. Enforced by a `UniqueConstraint`, asserted directly in the test suite.
 
@@ -405,13 +407,13 @@ Full reasoning: **`docs/author-metadata-plan.md`**. What matters architecturally
 
 **Conflicts resolve to NULL for single-valued traits, to the UNION for mother tongue.** Union invents nothing (every tongue in it was asserted by some survey of that person), whereas NULLing on a set disagreement would have cost the Malay facet all 21 of its files over one inconsistent row. Every normalised value is stored raw-plus-parsed, and a *partial* duration parse is treated as a failure rather than a number.
 
-**Only two of the five requested traits became facets.** Age, duration of learning and difficulty all change between a person's two surveys per academic year, and a filename records only year and grade — so attaching one value per file would mean choosing arbitrarily. They are imported and stored, awaiting a client rule. `Major` is worse: KUIS/OU record a language, TUFS a faculty.
+**Only two of the five requested traits became facets.** Age, duration of learning and difficulty all change between a person's two surveys per academic year, and a filename records only year and grade — so attaching one value per file would mean choosing arbitrarily. `Major` is worse: KUIS/OU record a language, TUFS a faculty. None of them are stored; adding one later is a column, a facet registration and a re-import.
 
-New: `main/author_metadata.py`, `main/management/commands/load_author_metadata.py`, `main/migrations/0015_author_metadata.py`, three table mirrors in `dataplane/models/tables.py` (+ 3 registrations each in `test_schema_drift.py`), `genders`/`mother_tongues` on `MetadataFilter`, `MetadataFacets`, `MetadataFilterParams` and `MetadataFacetsResponse`.
+New: `main/author_metadata.py`, `main/management/commands/load_author_metadata.py`, `main/migrations/0015_author_metadata.py`, two table mirrors in `dataplane/models/tables.py` (+ 3 registrations each in `test_schema_drift.py`), `genders`/`mother_tongues` on `MetadataFilter`, `MetadataFacets`, `MetadataFilterParams` and `MetadataFacetsResponse`.
 
 Also fixed here: the three survey CSVs had been dropped into `metadata/`, where `load_metadata_catalogue`'s non-recursive `*.csv` glob and required-header check made them abort the entire catalogue import. They live in `metadata/authors/` now, with a regression test over the real directory.
 
-*(Status: ✅ done, backend — 228/228 Django tests, 172/172 data plane tests, all seven endpoints exercised with both new facets. **Not yet applied to `corpus_db`**: `0015` is unapplied there, as `0014` still is. KUIS-FE controls not built; the Django picker renders both facets with a coverage note, since only 3 of 7 universities are surveyed and 53% of the corpus answers "(no value)".)*
+*(Status: ✅ done, backend — 221/221 Django tests, 171/171 data plane tests, all seven endpoints exercised with both new facets. **Not yet applied to `corpus_db`**: `0015` is unapplied there, as `0014` still is. KUIS-FE controls not built; the Django picker renders both facets with a coverage note, since only 3 of 7 universities are surveyed and 53% of the corpus answers "(no value)".)*
 
 ---
 

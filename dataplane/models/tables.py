@@ -44,12 +44,10 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
-    Date,
     DateTime,
     Integer,
     JSON,
     MetaData,
-    Numeric,
     SmallInteger,
     String,
     Table,
@@ -235,38 +233,3 @@ author_mother_tongue = Table(
     Column("tongue_raw", String(200)),
 )
 
-
-# Every survey occasion in full. Mirrored for completeness and for future
-# facets (age / duration / difficulty, which need a client decision on which
-# occasion applies to a file) — nothing in the dataplane reads it yet.
-author_survey = Table(
-    "main_authorsurvey",
-    metadata,
-    Column("id", BigInteger, primary_key=True),
-    Column("author_id", BigInteger),
-    Column("survey_date", Date, nullable=True),
-    Column("survey_date_raw", String(50)),
-    Column("academic_year", Integer, nullable=True),
-    Column("age", Integer, nullable=True),
-    Column("grade", Integer, nullable=True),
-    Column("major", String(200)),
-    Column("mother_tongues_raw", String(200)),
-    Column("duration_learning_raw", String(100)),
-    Column("duration_learning_months", Numeric(8, 2), nullable=True),
-    Column("other_fl_1", String(100)),
-    Column("duration_fl_1_raw", String(100)),
-    Column("duration_fl_1_months", Numeric(8, 2), nullable=True),
-    Column("other_fl_2", String(100)),
-    Column("duration_fl_2_raw", String(100)),
-    Column("duration_fl_2_months", Numeric(8, 2), nullable=True),
-    Column("proficiency_level", String(50)),
-    Column("test_month_year", String(50)),
-    Column("place_of_stay", String(200)),
-    Column("duration_of_stay_raw", String(100)),
-    Column("duration_of_stay_months", Numeric(8, 2), nullable=True),
-    Column("difficulty_level", Integer, nullable=True),
-    Column("reasons", Text),
-    Column("reasons_en", Text),
-    Column("source_file", String(100)),
-    Column("imported_at", DateTime(timezone=True)),
-)

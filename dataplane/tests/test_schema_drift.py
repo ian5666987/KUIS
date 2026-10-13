@@ -24,7 +24,6 @@ import pytest  # noqa: E402
 from dataplane.models.tables import (  # noqa: E402
     author,
     author_mother_tongue,
-    author_survey,
     corpus,
     corpus_documents,
     document,
@@ -56,7 +55,6 @@ SA_TABLES = {
     "document_metadata": document_metadata,
     "author": author,
     "author_mother_tongue": author_mother_tongue,
-    "author_survey": author_survey,
 }
 
 
@@ -75,7 +73,6 @@ SA_TABLES = {
         ("document_metadata", "main.models.DocumentMetadata", "main_documentmetadata"),
         ("author", "main.models.Author", "main_author"),
         ("author_mother_tongue", "main.models.AuthorMotherTongue", "main_authormothertongue"),
-        ("author_survey", "main.models.AuthorSurvey", "main_authorsurvey"),
     ],
 )
 def test_table_name_and_columns_match_django(sa_table, django_model_path, django_table_name):

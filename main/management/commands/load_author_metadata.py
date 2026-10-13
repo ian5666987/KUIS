@@ -22,8 +22,11 @@ AUTHORS_DIR = settings.BASE_DIR / 'metadata' / 'authors'
 class Command(BaseCommand):
     help = (
         "Loads person-level author metadata from metadata/authors/*.csv into "
-        "Author / AuthorMotherTongue / AuthorSurvey, and links each author to "
-        "its catalogue rows on (university, name code). "
+        "Author / AuthorMotherTongue, and links each author to its catalogue "
+        "rows on (university, name code). "
+        "Only gender and mother tongue are imported; the source CSVs' other "
+        "columns are read past, because nothing queries them and most of them "
+        "change between a person's surveys (see docs/author-metadata-plan.md). "
         "Idempotent and safe to rerun, like load_metadata_catalogue and "
         "load_error_taxonomy: survey data gets corrected at source "
         "independently of the schema, so it is not baked into migration "
@@ -73,8 +76,6 @@ class Command(BaseCommand):
             total.rows_read += report.rows_read
             total.authors_created += report.authors_created
             total.authors_updated += report.authors_updated
-            total.surveys_created += report.surveys_created
-            total.surveys_updated += report.surveys_updated
             total.tongues_written += report.tongues_written
             total.linked += report.linked
             total.errors.extend(report.errors)
@@ -145,7 +146,6 @@ class Command(BaseCommand):
         verb = 'would import' if dry_run else 'imported'
         self.stdout.write(
             f'  {verb}: {report.authors_total} author(s), '
-            f'{report.surveys_created + report.surveys_updated} survey(s), '
             f'{report.tongues_written} mother tongue(s) '
             f'from {report.rows_read} row(s)'
         )
@@ -172,7 +172,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.MIGRATE_HEADING('\nAll files'))
         self.stdout.write(
             f'  {verb}: {total.authors_total} author(s), '
-            f'{total.surveys_created + total.surveys_updated} survey(s) '
+            f'{total.tongues_written} mother tongue(s) '
             f'from {total.rows_read} row(s)'
         )
         if not dry_run:

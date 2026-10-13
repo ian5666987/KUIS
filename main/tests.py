@@ -2553,72 +2553,6 @@ class LoadAuthorMetadataCommandTests(TestCase):
 
     # --- parsing ----------------------------------------------------------
 
-    def test_duration_parses_compound_and_full_width_forms(self):
-        from .author_metadata import parse_duration_to_months
-
-        for raw, expected in [
-            ('1 month(s)', 1),
-            ('1 year(s)', 12),
-            ('1 year(s)3 month(s)', 15),
-            ('1.5 year(s)', 18),
-            # NFKC folds the full-width digit the source really contains.
-            ('１ year(s)', 12),
-            ('1  month(s)', 1),
-            ('0 year(s)0 month(s)', 0),
-        ]:
-            with self.subTest(raw=raw):
-                months, note = parse_duration_to_months(raw)
-                self.assertEqual(float(months), expected)
-                self.assertIsNone(note)
-
-    def test_week_and_day_durations_use_mean_month_lengths(self):
-        from .author_metadata import parse_duration_to_months
-
-        week, _ = parse_duration_to_months('1 week(s)')
-        day, _ = parse_duration_to_months('5 day(s)')
-        self.assertAlmostEqual(float(week), 0.23, places=2)
-        self.assertAlmostEqual(float(day), 0.16, places=2)
-
-    def test_an_ambiguous_duration_is_not_silently_half_parsed(self):
-        """'2、3 year(s)' means "two or three years". Matching just the
-        '3 year(s)' and returning 36 would be a guess presented as data."""
-        from .author_metadata import parse_duration_to_months
-
-        months, note = parse_duration_to_months('2、3 year(s)')
-        self.assertIsNone(months)
-        self.assertIn('ambiguous', note)
-
-    def test_a_duration_in_another_notation_is_unparseable_not_zero(self):
-        from .author_metadata import parse_duration_to_months
-
-        for raw in ('2カ月', '８ヵ月'):
-            with self.subTest(raw=raw):
-                months, note = parse_duration_to_months(raw)
-                self.assertIsNone(months)
-                self.assertTrue(note)
-
-    def test_a_qualifier_keeps_the_number_and_reports_the_drop(self):
-        from .author_metadata import parse_duration_to_months
-
-        months, note = parse_duration_to_months('約10 year(s)')
-        self.assertEqual(float(months), 120)
-        self.assertIn('約', note)
-
-    def test_academic_year_runs_april_to_march(self):
-        """A January survey describes the academic year that began the
-        previous April — which is the year a filename refers to."""
-        from .author_metadata import parse_survey_date
-
-        self.assertEqual(parse_survey_date('2023/5/16')[1], 2023)
-        self.assertEqual(parse_survey_date('2024/1/10')[1], 2023)
-        self.assertEqual(parse_survey_date('2024/4/1')[1], 2024)
-
-    def test_a_date_with_no_year_yields_null_rather_than_a_guess(self):
-        from .author_metadata import parse_survey_date
-
-        self.assertEqual(parse_survey_date('11/27'), (None, None))
-        self.assertEqual(parse_survey_date(''), (None, None))
-
     def test_mother_tongues_split_on_every_separator_the_source_uses(self):
         from .author_metadata import split_mother_tongues
 
@@ -2631,14 +2565,13 @@ class LoadAuthorMetadataCommandTests(TestCase):
     # --- import -----------------------------------------------------------
 
     def test_imports_one_author_per_person_not_per_survey_row(self):
-        from .models import Author, AuthorSurvey
+        from .models import Author
 
         self._run()
 
+        # 9 CSV rows describe 6 people — ACHI, KONA and NEGSEI each appear
+        # twice. Collapsing them is the whole job of the grouping step.
         self.assertEqual(Author.objects.count(), 6)
-        self.assertEqual(AuthorSurvey.objects.count(), 9)
-        achi = Author.objects.get(university='KUIS', name_code='ACHI')
-        self.assertEqual(achi.surveys.count(), 2)
 
     def test_osaka_maps_to_the_catalogue_s_university_code(self):
         """The surveys spell it out; the catalogue uses the filename prefix.
@@ -2703,60 +2636,79 @@ class LoadAuthorMetadataCommandTests(TestCase):
         self.assertTrue(negsei.has_conflict)
         self.assertIn('mother tongue sets differ', output)
 
-    def test_per_survey_values_that_vary_are_all_kept(self):
-        """Age and duration change between ACHI's two surveys. Both rows keep
-        their own value — which is exactly why neither is a facet yet."""
+    def test_only_gender_and_mother_tongue_are_imported(self):
+        """The source CSVs carry 20 columns; only these two are stored.
+
+        Pinned as a test because the tempting change is to "just also keep"
+        age or duration while the parsing code is open. Nothing reads them,
+        and most of them have no single honest value per file — a person is
+        surveyed twice per academic year and a filename records only year and
+        grade. The CSVs are the authority and are in git, so re-importing is
+        the entire cost of changing this decision.
+        """
+        from .author_metadata import AUTHOR_CSV_FIELD_MAP
+        from .models import Author
+
+        self.assertEqual(
+            set(AUTHOR_CSV_FIELD_MAP.values()),
+            {'name_code', 'university', 'gender', 'mother_tongues_raw'},
+        )
+
+        self._run()
+
+        # No per-occasion storage exists to read back at all.
+        achi = Author.objects.get(university='KUIS', name_code='ACHI')
+        self.assertFalse(hasattr(achi, 'surveys'))
+
+        # ACHI's two rows differ in age (18/19) and duration (1/9 months);
+        # both collapse to one author carrying only the invariant traits.
+        self.assertEqual(achi.gender, 'Female')
+        self.assertEqual([t.tongue for t in achi.mother_tongues.all()], ['Japanese'])
+
+    def test_a_malformed_value_in_an_unimported_column_is_not_reported(self):
+        """CHID's '2、3 year(s)' duration and MADA's year-less date are real
+        source defects, but in columns nothing queries. Asking the client to
+        fix data the system has no opinion about is noise, so they are silent.
+        """
+        output = self._run()
+
+        self.assertNotIn('2、3 year(s)', output)
+        self.assertNotIn('11/27', output)
+        self.assertNotIn('duration', output.lower())
+
+    def test_the_sixteen_unmapped_columns_are_read_past_without_error(self):
+        """The fixture is a full 20-column export with CRLF endings. Only four
+        headers are mapped, so the rest must be ignored silently — the same
+        thing import_catalogue_rows does for a header the model has no home
+        for.
+
+        This replaces an older test that asserted the trailing \r was stripped
+        from the last column. That no longer has anything to assert: \r only
+        lands on the LAST column, and the last column
+        ('Reasons (translated into English)') is not imported any more.
+        """
         from .models import Author
 
         self._run()
 
-        surveys = Author.objects.get(
-            university='KUIS', name_code='ACHI',
-        ).surveys.order_by('survey_date')
-
-        self.assertEqual([s.age for s in surveys], [18, 19])
-        self.assertEqual(
-            [float(s.duration_learning_months) for s in surveys], [1.0, 9.0],
-        )
-        self.assertEqual([s.academic_year for s in surveys], [2023, 2023])
-
-    def test_raw_values_are_kept_alongside_every_parsed_one(self):
-        """The client corrects the CSVs at source, so the database has to stay
-        reconstructible even where parsing failed."""
-        from .models import AuthorSurvey
-
-        self._run()
-
-        chid = AuthorSurvey.objects.get(author__name_code='CHID')
-        self.assertEqual(chid.duration_fl_1_raw, '2、3 year(s)')
-        self.assertIsNone(chid.duration_fl_1_months)
-
-        mada = AuthorSurvey.objects.get(author__name_code='MADA')
-        self.assertEqual(mada.survey_date_raw, '11/27')
-        self.assertIsNone(mada.survey_date)
-        self.assertAlmostEqual(float(mada.duration_of_stay_months), 0.23, places=2)
-
-    def test_the_last_column_has_no_trailing_carriage_return(self):
-        from .models import AuthorSurvey
-
-        self._run()
-
-        self.assertEqual(
-            AuthorSurvey.objects.get(author__name_code='MADA').reasons_en, 'simple',
-        )
+        # Imported cleanly despite 16 unmapped columns, and nothing leaked a
+        # stray carriage return into a value we do keep.
+        achi = Author.objects.get(university='KUIS', name_code='ACHI')
+        self.assertEqual(achi.name_code, 'ACHI')
+        self.assertEqual(achi.gender, 'Female')
+        self.assertEqual(achi.gender_raw, 'Female')
+        self.assertNotIn('\r', achi.name_code + achi.gender)
 
     def test_rerun_updates_rather_than_duplicating(self):
-        from .models import Author, AuthorMotherTongue, AuthorSurvey
+        from .models import Author, AuthorMotherTongue
 
         self._run()
-        before = (Author.objects.count(), AuthorSurvey.objects.count(),
-                  AuthorMotherTongue.objects.count())
+        before = (Author.objects.count(), AuthorMotherTongue.objects.count())
 
         self._run()
 
         self.assertEqual(
-            (Author.objects.count(), AuthorSurvey.objects.count(),
-             AuthorMotherTongue.objects.count()),
+            (Author.objects.count(), AuthorMotherTongue.objects.count()),
             before,
         )
 
@@ -2895,15 +2847,15 @@ class LoadAuthorMetadataCommandTests(TestCase):
         are the real corpus's, so a regression in parsing or linking shows up
         as a changed count rather than as a silent behaviour change.
         """
-        from .models import Author, AuthorMotherTongue, AuthorSurvey
+        from .models import Author, AuthorMotherTongue
 
         out = StringIO()
         with self.assertRaises(CommandError):
             call_command('load_author_metadata', stdout=out)
 
+        # 439 survey rows across the three files collapse to 235 people.
         self.assertEqual(Author.objects.count(), 235)
-        self.assertEqual(AuthorSurvey.objects.count(), 439)
-        # 225 authors have a tongue; NEGSEI has two.
+        # 225 of them have a tongue; NEGSEI has two.
         self.assertEqual(AuthorMotherTongue.objects.count(), 226)
         # order_by('tongue') before values_list is required, not stylistic:
         # Meta.ordering is ['author', 'tongue'], and ORDER BY columns join the
