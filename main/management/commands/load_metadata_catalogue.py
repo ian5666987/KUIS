@@ -32,7 +32,7 @@ class Command(BaseCommand):
         "Rows whose file has not been uploaded yet are kept and left "
         "unlinked; run with --relink after uploading to resolve them. "
         "A filename appearing more than once with differing data is resolved "
-        "last-row-wins and reported. See docs/metadata-catalogue-plan.md."
+        "last-row-wins and reported. See docs/data-processing.md."
     )
 
     def add_arguments(self, parser):

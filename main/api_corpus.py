@@ -17,7 +17,7 @@ _annotated_corpora() rather than importing it — same reasoning as the
 original Phase 3 docstring: this module is a different, additive surface
 (JSON API vs. server-rendered HTML) that happens to need the same shape
 today. File-upload decoding and dedup-or-create instead go through
-main/document_ingest.py (docs/content-hash-dedup.md), a neutral module both
+main/document_ingest.py (docs/data-processing.md), a neutral module both
 this file and main/views.py import, rather than each having their own copy.
 """
 

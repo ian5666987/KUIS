@@ -8,7 +8,7 @@ kind of thing that only fail at the SQL level.
 
 All expected values below were hand-verified against the seeded fixture's
 known token sequence before being written as assertions (see
-docs/new-architecture.md's Phase 4 status entry) — not derived from running
+docs/CHANGELOG.md's Phase 4 status entry) — not derived from running
 this code and trusting the output. seeded_corpus / session / document_ids
 fixtures live in conftest.py.
 """

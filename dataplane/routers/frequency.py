@@ -29,7 +29,7 @@ async def search_frequency(
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     # The cross-feature secondary metadata filter — one Depends()-able params
     # object instead of four Query() declarations repeated on seven endpoints
-    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # (docs/data-processing.md, dataplane/schemas/metadata.py).
     # Sits here, before the defaulted params, so it needs no `= None` default:
     # FastAPI always constructs it, and a default would imply it can be None.
     metadata: Annotated[MetadataFilterParams, Depends()],

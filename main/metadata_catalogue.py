@@ -1,9 +1,9 @@
 """The document metadata catalogue: filename matching, CSV import, facets.
 
-Feature context: docs/metadata-catalogue-plan.md. The matching rules this
+Feature context: docs/data-processing.md. The matching rules this
 module implements — the header-first key, what the normalizer does and
 deliberately does not do, both resolution directions, and the edge cases —
-are documented as their own reference in docs/metadata-matching.md, which is
+are documented as their own reference in docs/data-processing.md, which is
 the authority for them.
 
 Deliberately a new/neutral module, for the same reason
@@ -55,7 +55,7 @@ FACET_FIELDS = ('university', 'year', 'grade', 'gender', 'mother_tongue')
 #
 # Needed because the facets no longer all live on one table: university/year/
 # grade are columns of the catalogue row, while gender is one hop further out
-# on the author (docs/author-metadata-plan.md). Traversing a nullable FK with
+# on the author (docs/data-processing.md). Traversing a nullable FK with
 # __isnull=True promotes BOTH hops to LEFT OUTER, so the "(no value)" option
 # keeps meaning all of "field empty", "no author" and "no catalogue row at
 # all" — which is exactly what it has to mean when four of the seven
@@ -174,7 +174,7 @@ def link_catalogue_entry(document):
 
     Called synchronously at upload (main/document_ingest.py) rather than from
     the worker, so a freshly uploaded document is visible to metadata filters
-    immediately — the same reasoning docs/content-hash-dedup.md gives for
+    immediately — the same reasoning docs/data-processing.md gives for
     computing content_hash at upload time. It's one indexed lookup.
 
     An entry already claimed by a different document is left alone: `document`

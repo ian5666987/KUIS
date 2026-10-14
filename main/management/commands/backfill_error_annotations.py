@@ -13,7 +13,7 @@ class Command(BaseCommand):
         "tokenization) but existing documents from before this feature "
         "shipped don't. Does NOT rebuild Token rows — run retokenize "
         "first if the nested-segment tokenizer fix hasn't been applied to "
-        "this document yet (docs/error-analytics-plan.md). Called "
+        "this document yet (docs/feature-list.md). Called "
         "directly (not via .delay()) for the same reason backfill_tier2.py "
         "is: this is already a synchronous, blocking CLI command."
     )

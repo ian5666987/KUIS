@@ -1,6 +1,6 @@
 """
 Query machinery behind PostgresErrorAnalyticsRepository — Error Frequency
-and EPIC (Error Phrase In Context) (docs/error-analytics-plan.md).
+and EPIC (Error Phrase In Context) (docs/feature-list.md).
 
 ErrorFilter.codes (a flat, OR-combined list of taxonomy codes at any
 depth — a leaf like "ktinf" or a category like "gramatikal") resolves
@@ -23,7 +23,7 @@ resolved here in a single query rather than the frontend enumerating and
 sending every individual leaf code.
 
 Error Frequency queries ErrorAnnotation directly (Tier-0/1), not the
-DocumentErrorFreq aggregate — see docs/error-analytics-plan.md Part 3: a
+DocumentErrorFreq aggregate — see docs/feature-list.md Part 3: a
 phrase's own text is not a bounded-enough dimension for a per-(document,
 phrase) aggregate to meaningfully shrink, the same reasoning EPIC's
 occurrences() (and KWIC) already use to stay off Tier-2 entirely.
@@ -67,7 +67,7 @@ async def resolve_leaf_node_ids(session: AsyncSession, filter: ErrorFilter) -> l
 def _base_conditions(document_ids: list[int], node_ids: list[int] | None):
     """`state != 'active'` and unresolved (`taxonomy_node IS NULL`) rows are
     excluded from every analytics read by default — kept (not deleted) in
-    ErrorAnnotation for audit/debugging (docs/error-analytics-plan.md), but
+    ErrorAnnotation for audit/debugging (docs/feature-list.md), but
     never surfaced here. EPIC's row shape also requires a resolved
     error_code/category_path to display."""
     conditions = [

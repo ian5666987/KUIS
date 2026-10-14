@@ -1,4 +1,4 @@
-"""Content-hash based upload deduplication (docs/content-hash-dedup.md).
+"""Content-hash based upload deduplication (docs/data-processing.md).
 
 The single place Document.content_hash is computed — main/views.py,
 main/api_documents.py, main/api_corpus.py and worker/tasks/indexing.py all
@@ -29,7 +29,7 @@ def canonicalize_for_hash(content):
     """Normalizes representationally-irrelevant differences before hashing, so
     two uploads of "the same" document dedup even when their raw bytes differ
     (BOM presence, CRLF vs LF, leading/trailing whitespace, XML attribute
-    order) — see docs/content-hash-dedup.md: these are the ways two exports of
+    order) — see docs/data-processing.md: these are the ways two exports of
     the same document routinely vary. Deliberately narrow: internal
     whitespace, case, and everything else about the text is left untouched,
     so meaningfully different plain text never collides. Never touches what
@@ -91,7 +91,7 @@ def get_or_create_document(*, title, content, user):
     reused document is already indexed).
 
     Does do one local thing beyond the insert: on a NEW document, links it to
-    its metadata catalogue entry (docs/metadata-catalogue-plan.md). That's
+    its metadata catalogue entry (docs/data-processing.md). That's
     synchronous and here, rather than in the worker and rather than repeated
     at all six upload sites, for the same reason content_hash is computed
     here — a document has to be visible to metadata filters the moment it

@@ -1,6 +1,6 @@
 """
 The async replacement for main/models.py's old post_save signal
-(architecture plan §5, optimisation_plan.md Tier 3: "Replace the post_save
+(architecture plan §5, docs/data-processing.md Tier 3: "Replace the post_save
 signal with an explicit index_document() call"). Triggered explicitly from
 main/views.py's corpus_create/corpus_edit/upload_document via
 `index_document.delay(doc.id)` right after doc.save() — the signal itself
@@ -32,7 +32,7 @@ from worker.tasks.error_annotations import extract_document_error_annotations
 # Bumped whenever main/corpus_parsing.py's tokenization logic changes in a
 # way that would produce different tokens for the same content — nothing
 # reads this for staleness detection yet (that's the follow-up
-# docs/new-architecture.md's Phase 5 entry notes as still open), but it's
+# docs/CHANGELOG.md's Phase 5 entry notes as still open), but it's
 # captured now so that follow-up doesn't need a second backfill pass.
 TOKENIZER_VERSION = 1
 
@@ -104,7 +104,7 @@ def index_document(document_id: int) -> int:
         # existing Token rows were actually built from. A future
         # `tokenized_hash IS DISTINCT FROM content_hash` check (not
         # implemented yet) is what would detect a document edited without
-        # reindexing — see optimisation_plan.md §5.
+        # reindexing — see data-processing.md §4.
         document.tokenized_hash = content_hash
         document.tokenizer_version = TOKENIZER_VERSION
         document.status = Document.STATUS_READY
@@ -141,7 +141,7 @@ def index_document(document_id: int) -> int:
     compute_document_word_freq.delay(document_id)
     compute_document_ngrams.delay(document_id)
     # Error annotations are a separate concern from tokens/word-freq/ngrams
-    # (docs/error-analytics-plan.md) — status above is intentionally NOT
+    # (docs/feature-list.md) — status above is intentionally NOT
     # gated on this completing; it has its own eventual-consistency window.
     # compute_document_error_freq is chained from inside this task, not
     # fired independently here, so it never races ahead of the annotations

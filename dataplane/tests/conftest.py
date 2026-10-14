@@ -49,7 +49,7 @@ CORPUS_XML = """<document>
 PLAIN_TEXT = "saya suka nasi goreng dan saya suka nasi goreng lagi"
 
 # A <segment> nested inside another <segment> — the data's way of
-# representing overlapping errors (docs/error-analytics-plan.md); a
+# representing overlapping errors (docs/feature-list.md); a
 # top-level segment with an unresolvable features path (taxonomy drift /
 # annotator typo); and a segment with real uppercase text (Error Frequency
 # groups/displays phrase text verbatim, but its search filter must still

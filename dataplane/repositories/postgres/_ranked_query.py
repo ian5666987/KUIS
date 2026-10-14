@@ -10,7 +10,7 @@ function (`size=1` vs `size>=2`) for all three.
 
 Ports main/views.py::_count_words + _rank_counter onto SQL:
   - _count_words builds a Counter of n-length windows per document (never
-    crossing a document boundary — docs/ONBOARDING.md §6) via
+    crossing a document boundary — docs/feature-list.md §10) via
     `zip(*[words[i:] for i in range(size)])`. The SQL equivalent is an
     N-way self-join on Token, keyed by (document_id, mode), joined on
     position offsets — the same technique

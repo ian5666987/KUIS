@@ -30,12 +30,12 @@ Phase 5: `token.word` (varchar) is GONE, replaced by `token.word_type_id`
 (architecture plan §2, Tier 1 — "Token.word_type FK replacing Token.word").
 `word_type`, `document_word_freq`, `document_ngram` (Tier 2) added.
 
-docs/error-analytics-plan.md: `error_taxonomy_node`, `error_annotation`,
+docs/feature-list.md: `error_taxonomy_node`, `error_annotation`,
 `document_error_freq` added — mirrors main.models.{ErrorTaxonomyNode,
 ErrorAnnotation, DocumentErrorFreq} column-for-column, same as every other
 table here.
 
-docs/metadata-catalogue-plan.md: `document_metadata` added, mirroring
+docs/data-processing.md: `document_metadata` added, mirroring
 main.models.DocumentMetadata. Note `main_document` itself is deliberately
 UNCHANGED by that feature — the FK points this way, so nothing above had to
 be re-mirrored.
@@ -85,7 +85,7 @@ corpus = Table(
     Column("created_by_id", BigInteger, nullable=True),
     Column("created_at", DateTime(timezone=True)),
     # Pre-existing drift, fixed in passing while touching this file for
-    # docs/error-analytics-plan.md: added by main/migrations/0011_corpus_
+    # docs/feature-list.md: added by main/migrations/0011_corpus_
     # is_public.py but never mirrored here — exactly the trap this file's
     # own module docstring (and test_schema_drift.py) warns about.
     Column("is_public", Boolean),
@@ -175,7 +175,7 @@ document_error_freq = Table(
     Column("count", Integer),
 )
 
-# docs/metadata-catalogue-plan.md. `document_id` is nullable because a
+# docs/data-processing.md. `document_id` is nullable because a
 # catalogue row exists whether or not its file has been uploaded yet — and
 # every analysis column is nullable because the secondary filter's "(no
 # value)" option has to treat "entry exists, field empty" and "no entry at
@@ -205,7 +205,7 @@ document_metadata = Table(
 )
 
 
-# docs/author-metadata-plan.md. The person behind a catalogue row, keyed on
+# docs/data-processing.md. The person behind a catalogue row, keyed on
 # (university, name_code) — never name_code alone, which collides across
 # universities in the real data. Only `gender` is read by the filter from this
 # table; the multi-valued mother tongue lives in author_mother_tongue below.

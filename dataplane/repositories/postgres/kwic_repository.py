@@ -4,7 +4,7 @@ Postgres implementation of KWICRepository (architecture plan §1/§4).
 Ports main/views.py::_word_index_matches + _hydrate_word_index onto raw SQL,
 generalized from single-word to an N-word phrase (see base.py's docstring on
 why), and fixes the two known defects along the way
-(docs/optimisation_plan.md):
+(docs/data-processing.md):
 
   - defect #3: _word_index_matches materialized EVERY match into a Python
     list before Paginator sliced it. Here, pagination is a real SQL

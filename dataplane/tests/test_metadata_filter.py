@@ -1,5 +1,5 @@
 """The secondary metadata filter at its single chokepoint,
-repositories/shared.py::resolve_document_ids (docs/metadata-catalogue-plan.md).
+repositories/shared.py::resolve_document_ids (docs/data-processing.md).
 
 The case worth the real database: a facet's "(no value)" option must select
 BOTH a document whose catalogue row leaves the field empty AND a document with

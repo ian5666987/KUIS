@@ -1,6 +1,6 @@
 """
 Secondary metadata filter: the one shared REQUEST schema in this package, plus
-the facets response (docs/metadata-catalogue-plan.md).
+the facets response (docs/data-processing.md).
 
 Every other module here is response-only, and says so — "request parameters
 are declared directly on the router as FastAPI Query(...) params rather than a
@@ -43,7 +43,7 @@ class MetadataFilterParams:
     university: Annotated[list[str] | None, Query()] = None
     year: Annotated[list[str] | None, Query()] = None
     grade: Annotated[list[str] | None, Query()] = None
-    # Author facets (docs/author-metadata-plan.md). Param names match
+    # Author facets (docs/data-processing.md). Param names match
     # main/metadata_catalogue.py's FACET_FIELDS, keeping one vocabulary across
     # both surfaces. mother_tongue is singular like the others even though a
     # person can have several: the param names the facet, and repeating it is

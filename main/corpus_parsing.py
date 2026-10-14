@@ -21,7 +21,7 @@ def _walk_body(body, original_words, corrected_words, annotations=None):
     ErrorAnnotation.start_position/end_position always land exactly where
     the original-stream Token.position for that span will — by
     construction, not by two independently-maintained walkers that could
-    drift (docs/error-analytics-plan.md).
+    drift (docs/feature-list.md).
 
     Fixes the historical bug where only direct children of <body> were
     visited: a <segment> nested inside another <segment> (the data's way of
@@ -30,7 +30,7 @@ def _walk_body(body, original_words, corrected_words, annotations=None):
     info/KUIS2023FUA201-Eror.xml) used to contribute nothing to either
     stream. Retokenizing real documents after this change shifts token
     counts/positions for any document that has nested segments — expected,
-    see the retokenize --dry-run step in docs/error-analytics-plan.md.
+    see the retokenize --dry-run step in docs/feature-list.md.
     """
 
     def add_both(text):
@@ -209,7 +209,7 @@ def extract_error_annotations(content):
 
     Uses the same recursive walk as extract_word_streams, so
     start_position/end_position land exactly where Token.position (mode=
-    original) will, by construction (docs/error-analytics-plan.md)."""
+    original) will, by construction (docs/feature-list.md)."""
     if not looks_like_structured_xml(content):
         return []
 

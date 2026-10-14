@@ -33,7 +33,7 @@ CORPUS_XML = """<document>
 PLAIN_TEXT = "saya suka nasi dan saya suka teh"
 
 # A <segment> nested inside another <segment> — the data's way of
-# representing overlapping errors (docs/error-analytics-plan.md), modeled
+# representing overlapping errors (docs/feature-list.md), modeled
 # after the real pattern in info/KUIS2023FUA201-Eror.xml. Outer segment
 # uses capital 'Correction' (the one rule the corrected token stream has
 # always honored); nested segment has no parent= attribute, mirroring real
@@ -461,7 +461,7 @@ class JWTAuthTests(TestCase):
 class CorpusVisibilityTests(ExplorerTestCase):
     """Corpus.is_public — the admin-only public/private sharing toggle
     (main/models.py). Both live surfaces enforce the same rule
-    (docs/ONBOARDING.md §1: server-rendered pages and the API are both live
+    (docs/feature-list.md §2: server-rendered pages and the API are both live
     at once), so this covers corpus_dashboard/corpus_detail *and*
     api_corpus.py's CorpusListView/CorpusDetailView side by side."""
 
@@ -631,7 +631,7 @@ class CorpusApiTests(ExplorerTestCase):
 
 
 class DocumentIngestTests(TestCase):
-    """main/document_ingest.py (docs/content-hash-dedup.md) — the hash
+    """main/document_ingest.py (docs/data-processing.md) — the hash
     formula used to detect duplicate uploads before a Document row is ever
     created, and the get_or_create wrapper around it."""
 
@@ -1190,7 +1190,7 @@ class DocumentApiTests(ExplorerTestCase):
 
 class HtmlUploadDedupTests(ExplorerTestCase):
     """Server-rendered corpus_create/corpus_edit/upload_document
-    (docs/content-hash-dedup.md) — confirms the HTML views reuse existing
+    (docs/data-processing.md) — confirms the HTML views reuse existing
     Document rows on duplicate content, the same as their JSON API
     equivalents in CorpusCrudApiTests/DocumentApiTests."""
 
@@ -1325,7 +1325,7 @@ class AccountApiTests(TestCase):
 
 class BackfillContentHashCommandTests(TestCase):
     """main/management/commands/backfill_content_hash.py
-    (docs/content-hash-dedup.md) — recomputes content_hash/tokenized_hash
+    (docs/data-processing.md) — recomputes content_hash/tokenized_hash
     under the new canonicalized formula for documents hashed (or never
     hashed) under the old one, without touching Token/aggregate rows."""
 
@@ -1420,7 +1420,7 @@ class ProfileApiTests(TestCase):
 
 class CorpusParsingTests(TestCase):
     """main/corpus_parsing.py's nested-segment fix + extract_error_annotations
-    (docs/error-analytics-plan.md). The pre-fix bug: only direct children of
+    (docs/feature-list.md). The pre-fix bug: only direct children of
     <body> were visited, so a <segment> nested inside another <segment> — the
     data's way of representing overlapping errors — contributed nothing to
     either stream. NESTED_CORPUS_XML/LOWERCASE_CORRECTION_XML are modeled on
@@ -1497,7 +1497,7 @@ class CorpusParsingTests(TestCase):
 
 
 class ErrorAnnotationWorkerTaskTests(TestCase):
-    """worker/tasks/error_annotations.py (docs/error-analytics-plan.md) —
+    """worker/tasks/error_annotations.py (docs/feature-list.md) —
     extraction + Tier-2 aggregation, chained from
     worker/tasks/indexing.py::index_document. Loads the real taxonomy
     (info/error.xml) so raw_features actually resolve, same as production."""
@@ -1601,7 +1601,7 @@ class ErrorAnnotationWorkerTaskTests(TestCase):
 
 class LoadErrorTaxonomyCommandTests(TestCase):
     """main/management/commands/load_error_taxonomy.py
-    (docs/error-analytics-plan.md) — loads info/error.xml, the real
+    (docs/feature-list.md) — loads info/error.xml, the real
     taxonomy file, not a test-only fixture."""
 
     def test_idempotent_rerun(self):
@@ -1653,7 +1653,7 @@ class LoadErrorTaxonomyCommandTests(TestCase):
 class BackfillErrorAnnotationsCommandTests(TestCase):
     """main/management/commands/backfill_error_annotations.py — mirrors
     BackfillContentHashCommandTests' shape for the error-annotation
-    equivalent (docs/error-analytics-plan.md)."""
+    equivalent (docs/feature-list.md)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -1692,7 +1692,7 @@ class BackfillErrorAnnotationsCommandTests(TestCase):
 
 
 class RetokenizeDryRunTests(TestCase):
-    """retokenize --dry-run (docs/error-analytics-plan.md) — reviews the
+    """retokenize --dry-run (docs/feature-list.md) — reviews the
     nested-segment tokenizer fix's impact on corpus_db before writing
     anything, the step this project's prior schema migrations already use
     before touching real data."""
@@ -1718,7 +1718,7 @@ class RetokenizeDryRunTests(TestCase):
 
 
 class AccountApiTestCase(TestCase):
-    """Shared fixture for main/api_users.py (docs/user-management-plan.md):
+    """Shared fixture for main/api_users.py (docs/feature-list.md):
     a plain user, an Admin (is_staff), and a Super Admin (is_superuser) —
     the three tiers the feature's RBAC distinguishes."""
 
@@ -1884,7 +1884,7 @@ class UserAccountApiTests(AccountApiTestCase):
         # were one, and an Admin's own row is never in the Users tier
         # either — so this guard is unreachable end-to-end through either
         # HTTP endpoint today. Kept as defense-in-depth regardless
-        # (docs/user-management-plan.md); tested directly instead of
+        # (docs/feature-list.md); tested directly instead of
         # pretending an unreachable HTTP scenario exists.
         from rest_framework.exceptions import PermissionDenied
         from rest_framework.test import APIRequestFactory
@@ -1977,7 +1977,7 @@ class AdminAccountApiTests(AccountApiTestCase):
         self.assertFalse(self.admin.is_active)
 
 
-# --- Document metadata catalogue (docs/metadata-catalogue-plan.md) ---------
+# --- Document metadata catalogue (docs/data-processing.md) ---------
 
 METADATA_CSV_HEADER = 'File name,University,Year,Grade,Topic,Topic (translated into English),Number of words,Name code'
 
@@ -2372,7 +2372,7 @@ class LoadMetadataCatalogueCommandTests(TestCase):
 class MetadataFilterViewTests(ExplorerTestCase):
     """The secondary metadata filter on the Django analysis surface — applied
     once in main/views.py::_get_selected_documents, so every analysis page and
-    every /export/ route inherits it (docs/metadata-catalogue-plan.md).
+    every /export/ route inherits it (docs/data-processing.md).
 
     `annotated` is fully described, `plain` has an entry with every facet empty,
     and a third document has no entry at all — the three states the "(no value)"
@@ -2625,7 +2625,7 @@ AUTHOR_CSV = '\r\n'.join([
 
 class LoadAuthorMetadataCommandTests(TestCase):
     """main/management/commands/load_author_metadata.py and
-    main/author_metadata.py (docs/author-metadata-plan.md)."""
+    main/author_metadata.py (docs/data-processing.md)."""
 
     def setUp(self):
         import tempfile
@@ -2980,7 +2980,7 @@ class LoadAuthorMetadataCommandTests(TestCase):
 class AuthorFacetFilterTests(ExplorerTestCase):
     """The author facets — gender (single-valued) and mother_tongue
     (multi-valued) — on the Django analysis surface
-    (docs/author-metadata-plan.md).
+    (docs/data-processing.md).
 
     The fixture is built to exercise the cases the real data actually
     contains:
@@ -3225,7 +3225,7 @@ class AuthorFacetFilterTests(ExplorerTestCase):
 
 class DocumentMetadataApiTests(ExplorerTestCase):
     """GET /api/documents/ exposing each document's catalogue entry
-    (docs/metadata-catalogue-plan.md). Extends ExplorerTestCase for its users
+    (docs/data-processing.md). Extends ExplorerTestCase for its users
     and JWT helper, same as DocumentApiTests."""
 
     @classmethod

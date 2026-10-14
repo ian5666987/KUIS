@@ -25,7 +25,7 @@ class ErrorTaxonomyNodeAdmin(admin.ModelAdmin):
 @admin.register(ErrorAnnotation)
 class ErrorAnnotationAdmin(admin.ModelAdmin):
     # state != 'active' rows are excluded from analytics reads by default
-    # but kept (not deleted) for audit/debugging (docs/error-analytics-plan.md)
+    # but kept (not deleted) for audit/debugging (docs/feature-list.md)
     # — this is the surface for reviewing them.
     list_display = ('document', 'raw_features', 'taxonomy_node', 'state', 'start_position', 'end_position')
     list_filter = ('state', 'taxonomy_node__top_category')

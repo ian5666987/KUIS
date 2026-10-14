@@ -4,8 +4,8 @@ FastAPI dependencies shared across routers (architecture plan §1/§3).
 get_current_user / require_staff: Phase 1. get_db_session / get_kwic_service:
 Phase 2. get_frequency_service / get_collocation_service / get_ngram_service:
 Phase 4, alongside their repositories. get_error_analytics_service /
-get_taxonomy_service: docs/error-analytics-plan.md. get_metadata_service:
-docs/metadata-catalogue-plan.md.
+get_taxonomy_service: docs/feature-list.md. get_metadata_service:
+docs/data-processing.md.
 """
 
 from typing import Annotated

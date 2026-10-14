@@ -1,5 +1,5 @@
 """
-Shared DRF permission classes for the JSON API (docs/user-management-plan.md).
+Shared DRF permission classes for the JSON API (docs/feature-list.md).
 
 ADMIN_PERMISSIONS used to be defined locally in main/api_corpus.py; moved
 here so main/api_users.py can reuse the exact same is_staff gate for the
@@ -32,6 +32,6 @@ def assert_not_targeting_self(request, target_user):
     through this feature — cheap defense-in-depth against an accidental
     lockout, kept even though today's tier-exclusion rules (an acting
     user's own row is never in the tier they're allowed to manage) already
-    make this unreachable end-to-end (docs/user-management-plan.md)."""
+    make this unreachable end-to-end (docs/feature-list.md)."""
     if target_user.pk == request.user.pk:
         raise PermissionDenied("You cannot perform this action on your own account.")

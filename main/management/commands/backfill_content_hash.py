@@ -19,7 +19,7 @@ class Command(BaseCommand):
         "hash formula did. Never writes two documents to the same "
         "content_hash: any group of documents whose content canonicalizes "
         "identically is left untouched and reported instead of merged — see "
-        "docs/content-hash-dedup.md on why that decision isn't automatic. "
+        "docs/data-processing.md on why that decision isn't automatic. "
         "Idempotent; re-run after resolving a reported collision by hand. "
         "Must be run — and report zero collisions — BEFORE applying "
         "main/migrations/0010_document_content_hash_unique.py."

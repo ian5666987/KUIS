@@ -38,7 +38,7 @@ class Command(BaseCommand):
             help=(
                 "Report before/after token-count deltas from the current "
                 "tokenizer (e.g. the nested-segment fix in "
-                "docs/error-analytics-plan.md) without writing anything — "
+                "docs/feature-list.md) without writing anything — "
                 "review this against corpus_db before running for real."
             ),
         )
@@ -53,7 +53,7 @@ class Command(BaseCommand):
         # hash -> aggregate sequence here — this command used to do that
         # itself and NOT recompute DocumentWordFreq/DocumentNgram
         # afterward, silently leaving them stale against the rebuilt
-        # tokens (exactly the kind of drift optimisation_plan.md's
+        # tokens (exactly the kind of drift docs/data-processing.md's
         # content-hash section warns about). Called directly rather than
         # via .delay() — this is already a synchronous, blocking CLI
         # command; there's no reason to introduce async dispatch (and a

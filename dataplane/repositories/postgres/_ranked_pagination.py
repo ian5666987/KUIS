@@ -35,7 +35,7 @@ async def paginate_sql_source(
     directly (Tier 0's self-join CONCAT, Tier 2's word-frequency JOIN to
     WordType.form). Returns (page_rows, result_count, type_count).
 
-    `case_sensitive=False` (docs/error-analytics-plan.md, Error Frequency)
+    `case_sensitive=False` (docs/feature-list.md, Error Frequency)
     matches the lowercased `query` term against `func.lower(item)` instead
     of `item` directly, while still SELECTing/returning `item`'s original
     casing — for a source whose item text preserves case on purpose (an

@@ -1,5 +1,5 @@
 """Endpoint-level tests for the secondary metadata filter
-(docs/metadata-catalogue-plan.md): GET /api/v1/metadata-facets, and the filter
+(docs/data-processing.md): GET /api/v1/metadata-facets, and the filter
 params riding along on the analysis endpoints.
 
 The point of testing it at the router level as well as at
@@ -164,7 +164,7 @@ def test_junk_on_a_numeric_facet_widens_rather_than_erroring(client, auth_header
 
 
 # --- author facets ---------------------------------------------------------
-# docs/author-metadata-plan.md. Two shapes to prove here, because they take
+# docs/data-processing.md. Two shapes to prove here, because they take
 # different code paths: `gender` is a column one chained outer join past
 # document_metadata, while `mother_tongue` is multi-valued and answered with
 # EXISTS against a child table.

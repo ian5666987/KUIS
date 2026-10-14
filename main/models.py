@@ -52,9 +52,9 @@ class Document(models.Model):
     status_reason = models.CharField(max_length=32, blank=True, default='')
     status_detail = models.TextField(blank=True, default='')
 
-    # Integrity/reproducibility placeholders (optimisation_plan.md §5).
+    # Integrity/reproducibility placeholders (data-processing.md §4).
     # content_hash now doubles as the upload-time dedup key (see
-    # docs/content-hash-dedup.md and main/document_ingest.py) — the unique
+    # docs/data-processing.md and main/document_ingest.py) — the unique
     # constraint below enforces it at the DB level. tokenized_hash tracks
     # what the current Token rows were actually built from; a future
     # `tokenized_hash IS DISTINCT FROM content_hash` staleness check remains
@@ -86,7 +86,7 @@ class Corpus(models.Model):
     # any existing corpus's visibility). Private corpora are visible only
     # to staff. Enforced in main/views.py (corpus_dashboard/corpus_detail)
     # and main/api_corpus.py (CorpusListView/CorpusDetailView) — both
-    # surfaces are live at once (docs/ONBOARDING.md §1), so both filter on
+    # surfaces are live at once (docs/feature-list.md §2), so both filter on
     # this the same way rather than just one of them.
     is_public = models.BooleanField(
         default=True,
@@ -106,7 +106,7 @@ class WordType(models.Model):
     §2, Tier 1). Heaps' law means this grows roughly as sqrt(tokens) — a
     10M-token corpus has perhaps 200-300k distinct forms, so Token storing
     an int FK here instead of repeating the varchar is the actual space/
-    speed win optimisation_plan.md's Tier 1 is about."""
+    speed win docs/data-processing.md's Tier 1 is about."""
 
     form = models.CharField(max_length=100, unique=True)
 
@@ -176,7 +176,7 @@ class DocumentNgram(models.Model):
     word_type ids, deduping the n-gram's identity across documents.
     ArrayField is Postgres-only, and this project's Django test suite (and
     CI's `django-tests` job) deliberately runs against SQLite for speed —
-    see docs/ONBOARDING.md §6/CI. Storing `word_type_ids` as a plain
+    see docs/data-processing.md §2 / CI. Storing `word_type_ids` as a plain
     cross-database JSONField directly on this table avoids that hard
     dependency, at the cost of repeating the same id sequence once per
     document instead of once globally — a fine trade at the corpus sizes
@@ -196,7 +196,7 @@ class DocumentNgram(models.Model):
 
 
 class ErrorTaxonomyNode(models.Model):
-    """The error-type tree from info/error.xml (docs/error-analytics-plan.md).
+    """The error-type tree from info/error.xml (docs/feature-list.md).
     Reference data, not user data — loaded/reloaded wholesale by the
     `load_error_taxonomy` management command, never edited row-by-row.
 
@@ -225,7 +225,7 @@ class ErrorTaxonomyNode(models.Model):
 
 class ErrorAnnotation(models.Model):
     """One row per <segment features=...> in a document's content — the
-    source-of-truth occurrence table (docs/error-analytics-plan.md),
+    source-of-truth occurrence table (docs/feature-list.md),
     extracted by worker/tasks/error_annotations.py via
     main/corpus_parsing.py::extract_error_annotations. `taxonomy_node` is
     nullable and `raw_features` is kept verbatim so an unresolvable code
@@ -260,7 +260,7 @@ class DocumentErrorFreq(models.Model):
     """Precomputed per-document error-type counts, mirroring DocumentWordFreq
     — used only by the summary view (SUM ... GROUP BY top_category).
     Error Frequency (grouping by the erroneous phrase's own text) reads
-    ErrorAnnotation directly instead — see docs/error-analytics-plan.md
+    ErrorAnnotation directly instead — see docs/feature-list.md
     Part 3 for why: unlike vocabulary, distinct phrase text is not a
     bounded-enough dimension for this aggregate to meaningfully shrink."""
 
@@ -279,7 +279,7 @@ class DocumentErrorFreq(models.Model):
 
 class UserProfile(models.Model):
     """Sidecar for the four extra fields user management needs on top of
-    django.contrib.auth.models.User (docs/user-management-plan.md) — a
+    django.contrib.auth.models.User (docs/feature-list.md) — a
     OneToOneField instead of a custom AUTH_USER_MODEL, since swapping that
     this late would touch every existing FK to auth.User (Document.user,
     Corpus.created_by, token_blacklist) for a net gain of four columns.
@@ -305,7 +305,7 @@ class UserProfile(models.Model):
 
 class DocumentMetadata(models.Model):
     """One row per catalogue entry from metadata/*.csv — NOT one per Document
-    (docs/metadata-catalogue-plan.md).
+    (docs/data-processing.md).
 
     The catalogue is the authority and is loaded independently of upload
     order: all ~1,500 rows can exist before a single file is uploaded, and a
@@ -337,7 +337,7 @@ class DocumentMetadata(models.Model):
     # document is a plain indexed equality.
     match_key = models.CharField(max_length=200, unique=True)
     # SET_NULL, not CASCADE: documents are never hard-deleted today
-    # (docs/user-management-plan.md), and if one ever is, the catalogue row
+    # (docs/feature-list.md), and if one ever is, the catalogue row
     # is source data that should outlive it.
     document = models.OneToOneField(
         Document,
@@ -363,7 +363,7 @@ class DocumentMetadata(models.Model):
     name_code = models.CharField(max_length=50, null=True, blank=True)
 
     # The person who wrote this file, resolved from (university, name_code)
-    # against the survey CSVs (docs/author-metadata-plan.md). Nullable for the
+    # against the survey CSVs (docs/data-processing.md). Nullable for the
     # same reason `document` is, and then some: four of the seven universities
     # (APU, CHU, SFC, SOP) have no survey data at all, so ~53% of the
     # catalogue is legitimately author-less. NULL here is what the filter's
@@ -404,7 +404,7 @@ class DocumentMetadata(models.Model):
 class Author(models.Model):
     """The person who wrote the essays — one row per (university, name_code),
     built from the person-level survey CSVs in metadata/authors/
-    (docs/author-metadata-plan.md).
+    (docs/data-processing.md).
 
     A separate table from DocumentMetadata because the grain is different:
     the catalogue has one row per FILE, the surveys have one row per PERSON
@@ -520,7 +520,7 @@ def build_tokens(document):
     Resolves each distinct word to a WordType row (bulk get-or-create, one
     query for the missing forms rather than one per word) before building
     Token rows against word_type_id — architecture plan §2's Tier 1
-    normalization, plus optimisation_plan.md defects #1/#2 (unbounded
+    normalization, plus docs/data-processing.md defects #1/#2 (unbounded
     bulk_create, no transaction), fixed together since both needed touching
     this same function anyway.
     """
@@ -562,6 +562,6 @@ def build_tokens(document):
 # on every Document creation is REMOVED as of architecture plan Phase 5 —
 # indexing is now explicitly triggered via worker/tasks/indexing.py
 # ::index_document(), called from main/views.py's upload/create views
-# (optimisation_plan.md Tier 3: "Replace the post_save signal with an
-# explicit index_document() call"). See docs/new-architecture.md's Phase 5
+# (docs/data-processing.md Tier 3: "Replace the post_save signal with an
+# explicit index_document() call"). See docs/CHANGELOG.md's Phase 5
 # status entry for why this moved here instead of staying implicit.

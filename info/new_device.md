@@ -6,14 +6,15 @@ Next.js frontend.
 
 > **This document replaced an earlier Django-only version.** KUIS stopped
 > being a single Django process during the architecture revamp
-> (`docs/new-architecture.md`). A device that only runs `manage.py
+> (`docs/CHANGELOG.md`). A device that only runs `manage.py
 > runserver` can serve the server-rendered pages, but **every analysis
 > feature in the Next.js frontend will fail**, because those read from the
 > FastAPI data plane, and new uploads will never be tokenized, because that
 > happens in the Celery worker. Set up all of it.
 >
-> Architecture background: `docs/ONBOARDING.md`. Feature write-ups:
-> `docs/*.md`.
+> Architecture background: `docs/ONBOARDING.md` (setup/config) and
+> `docs/feature-list.md` (features + architecture). Data storage, indexing and
+> query handling: `docs/data-processing.md`. History: `docs/CHANGELOG.md`.
 
 ---
 
@@ -532,7 +533,7 @@ your-workspace/
 │   ├── main/                  # Django app: models, views, api_*, templates
 │   ├── dataplane/             # FastAPI: routers/services/repositories/schemas
 │   ├── worker/                # Celery app + tasks
-│   ├── docs/                  # ONBOARDING.md + per-feature write-ups
+│   ├── docs/                  # ONBOARDING, feature-list, data-processing, CHANGELOG
 │   ├── info/                  # error.xml taxonomy, sample corpus XML, this file
 │   ├── metadata/              # metadata_2023.csv, metadata_2024.csv
 │   └── docker/                # three Dockerfiles

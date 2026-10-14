@@ -1,6 +1,6 @@
 """Postgres implementation of MetadataRepository — serves the distinct values
 available on each secondary-filter facet, for populating the filter controls
-(docs/metadata-catalogue-plan.md).
+(docs/data-processing.md).
 
 Reads DocumentMetadata, Django-owned reference data loaded by
 `load_metadata_catalogue` from metadata/*.csv. Read-only, same "Django owns,

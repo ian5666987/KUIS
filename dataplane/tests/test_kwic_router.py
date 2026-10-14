@@ -4,7 +4,7 @@ Endpoint-level test for GET /api/v1/kwic through the real FastAPI app
 equivalent of the parity check run manually during development, comparing
 this endpoint's output against Django's live `/analysis/kwic/search/export/`
 and `/analysis/kwic/export/` CSV endpoints for the same query — see
-docs/new-architecture.md's Phase 2 status entry for that comparison's
+docs/CHANGELOG.md's Phase 2 status entry for that comparison's
 result (byte-for-byte match). seeded_corpus/client/auth_headers fixtures
 live in conftest.py.
 """

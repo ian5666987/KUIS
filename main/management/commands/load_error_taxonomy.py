@@ -16,7 +16,7 @@ class Command(BaseCommand):
         "seed.py) — replaces the whole table each run rather than being "
         "baked into migration history, since taxonomy content (glosses, "
         "new codes) may get corrected/extended independently of the "
-        "schema. See docs/error-analytics-plan.md."
+        "schema. See docs/feature-list.md."
     )
 
     def handle(self, *args, **options):

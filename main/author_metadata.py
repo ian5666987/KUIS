@@ -1,6 +1,6 @@
 """Person-level author metadata: CSV import, normalisation, document linking.
 
-Feature context: docs/author-metadata-plan.md.
+Feature context: docs/data-processing.md.
 
 A sibling of main/metadata_catalogue.py, not part of it, because the two read
 CSVs at different GRAINS and neither one's rules make sense for the other:
@@ -124,7 +124,7 @@ class AuthorImportReport:
 
     The validation report IS the deliverable here, not a side effect: the
     client owns the CSVs and corrects them at source
-    (docs/author-metadata-plan.md), so an inconsistency that never gets named
+    (docs/data-processing.md), so an inconsistency that never gets named
     never gets fixed. `errors` mean a value could not be used; `warnings` mean
     it was imported with a caveat.
 

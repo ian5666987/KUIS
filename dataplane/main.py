@@ -3,7 +3,7 @@ FastAPI data plane — KWIC, frequency, n-gram, collocation, error analytics
 (architecture plan §1). Phase 2 ported fast-KWIC. Phase 4 adds word
 frequency, collocations, and n-grams, all three sharing one query builder
 (dataplane/repositories/postgres/_ranked_query.py) at different values of
-n. error_analytics + taxonomy (docs/error-analytics-plan.md) add Error
+n. error_analytics + taxonomy (docs/feature-list.md) add Error
 Frequency and EPIC (Error Phrase In Context).
 
 Run locally with: uvicorn dataplane.main:app --reload --port 8001
@@ -50,5 +50,5 @@ app.include_router(ngrams.router)
 app.include_router(error_analytics.router)
 app.include_router(taxonomy.router)
 # Reference data for the secondary metadata filter, alongside taxonomy
-# (docs/metadata-catalogue-plan.md).
+# (docs/data-processing.md).
 app.include_router(metadata.router)

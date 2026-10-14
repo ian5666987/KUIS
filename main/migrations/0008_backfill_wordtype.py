@@ -29,7 +29,7 @@ def backfill_word_type(apps, schema_editor):
 
     # UPDATE ... via bulk_update would need every row loaded into Python;
     # for the corpus sizes this project actually has today that's fine
-    # (documented in optimisation_plan.md as "not the scaling risk" up to
+    # (documented in docs/data-processing.md as "not the scaling risk" up to
     # tens of millions of tokens), and a raw UPDATE...FROM would tie this
     # migration to Postgres-specific SQL when the model itself stays
     # cross-database (see DocumentNgram's docstring on the same tradeoff).

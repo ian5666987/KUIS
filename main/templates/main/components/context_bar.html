@@ -20,7 +20,7 @@
   <input type="hidden" name="corpus_selection" value="1">
   {% comment %} The metadata facet params must be excluded here: they have real
      controls in the panel below, so re-emitting them as hidden inputs would
-     submit every value twice (docs/metadata-catalogue-plan.md). {% endcomment %}
+     submit every value twice (docs/data-processing.md). {% endcomment %}
   {% hidden_params exclude="corpus,corpus_selection,corrected,page,university,year,grade,gender,mother_tongue,name_code" %}
 
   <div class="context__summary">

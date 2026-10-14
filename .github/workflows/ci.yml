@@ -26,7 +26,7 @@ jobs:
           python-version: "3.14"
           cache: "pip"
       - run: pip install -r requirements.txt
-      # docs/ONBOARDING.md §6: Django's test client adds 'testserver' to
+      # docs/ONBOARDING.md §3: Django's test client adds 'testserver' to
       # ALLOWED_HOSTS automatically, no override needed here.
       # main/tests.py::JWTAuthTests covers the /api/auth/token/* endpoints
       # (architecture plan §3) — obtain, refresh rotation + blacklist reuse

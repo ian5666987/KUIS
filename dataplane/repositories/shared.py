@@ -7,15 +7,15 @@ plan §6), so this takes corpus_ids directly rather than reading a session.
 
 DISTINCT matters here for the identical reason it does in the Django
 version: a document in two selected corpora must be counted once, not
-twice — see docs/ONBOARDING.md §6 ("Overlap is deduped via .distinct()").
+twice — see docs/feature-list.md §10 ("Corpus overlap is deduped via .distinct()").
 
 This is also where the secondary metadata filter is applied
-(docs/metadata-catalogue-plan.md). Deliberately HERE and nowhere else: the
+(docs/data-processing.md). Deliberately HERE and nowhere else: the
 filter narrows the document set rather than changing any feature's
 computation, and all seven endpoints already funnel through this one
 function, so none of the repository interfaces, SQL builders or worker
 aggregates need to know the filter exists. The same single-mechanism
-argument docs/error-analytics-plan.md makes for resolving taxonomy codes
+argument docs/feature-list.md makes for resolving taxonomy codes
 with one LIKE.
 """
 

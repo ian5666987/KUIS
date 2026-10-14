@@ -170,7 +170,7 @@ class NgramRepository(ABC):
 
 # --- Error Analytics ------------------------------------------------------
 # Error Frequency + EPIC (Error Phrase In Context) — see
-# docs/error-analytics-plan.md for the full design.
+# docs/feature-list.md for the full design.
 #
 # `codes` is a flat list of taxonomy codes AT ANY DEPTH (a leaf like
 # "ktinf" or a category like "gramatikal"), OR-combined — matches every
@@ -302,7 +302,7 @@ class TaxonomyRepository(ABC):
 
 
 # --- Document metadata -----------------------------------------------------
-# The secondary filter axis (docs/metadata-catalogue-plan.md): catalogue
+# The secondary filter axis (docs/data-processing.md): catalogue
 # fields imported from metadata/*.csv and attached to a Document. Unlike
 # ErrorFilter this is NOT per-feature — it narrows the document set every
 # feature runs over, so it is applied once in
@@ -332,7 +332,7 @@ class MetadataFilter:
     universities: tuple[str, ...] = ()
     years: tuple[int, ...] = ()
     grades: tuple[int, ...] = ()
-    # Author facets (docs/author-metadata-plan.md). `genders` reads a column
+    # Author facets (docs/data-processing.md). `genders` reads a column
     # one hop past document_metadata; `mother_tongues` is multi-valued and is
     # answered with EXISTS against the child table — see
     # repositories/shared.py. Both compose exactly like the facets above: OR

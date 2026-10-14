@@ -448,7 +448,7 @@ def _get_selected_documents(request):
     # being counted more than once
     documents = Document.objects.filter(corpora__id__in=ids).distinct()
 
-    # The secondary metadata filter (docs/metadata-catalogue-plan.md). Applied
+    # The secondary metadata filter (docs/data-processing.md). Applied
     # here, not per view, for the same reason the corpus selection is: every
     # analysis page and all five /export/ routes already resolve their
     # documents through this one function, so they all pick the filter up
@@ -484,7 +484,7 @@ def _analysis_context(request, documents, feature=None):
         'feature': feature,
         'corrected': corrected,
         # Secondary metadata filter state for the context bar
-        # (docs/metadata-catalogue-plan.md). `metadata_facets` is a list
+        # (docs/data-processing.md). `metadata_facets` is a list
         # rather than a dict so the template can iterate it without a custom
         # filter, and each facet carries its own selected set so a checkbox
         # can decide `checked` without a lookup tag.
@@ -502,7 +502,7 @@ METADATA_FACET_LABELS = {
     'university': 'University',
     'year': 'Year',
     'grade': 'Grade',
-    # Author facets (docs/author-metadata-plan.md). "Mother tongue" is
+    # Author facets (docs/data-processing.md). "Mother tongue" is
     # singular in the label even though a writer can have several: the control
     # asks which tongue to filter BY, and ticking two means "either".
     'gender': 'Gender',

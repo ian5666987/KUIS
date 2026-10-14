@@ -1,5 +1,5 @@
 """
-Account management over the API (docs/user-management-plan.md): Admin
+Account management over the API (docs/feature-list.md): Admin
 manages regular Users, Super Admin manages Admins (and, since is_staff also
 covers Super Admin, gets everything the Users endpoints offer too — the
 confirmed "superset" behavior, for free from ADMIN_PERMISSIONS' own is_staff

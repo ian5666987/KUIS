@@ -1,6 +1,6 @@
 """Endpoint-level test for GET /api/v1/frequency — parity-checked live
 against Django's /analysis/frequency/export/ during development (see
-docs/new-architecture.md's Phase 4 status entry: exact set AND order match,
+docs/CHANGELOG.md's Phase 4 status entry: exact set AND order match,
 including the count-tie alphabetical tie-break). client/auth_headers/
 seeded_corpus fixtures live in conftest.py."""
 

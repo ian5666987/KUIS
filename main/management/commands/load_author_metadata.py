@@ -26,7 +26,7 @@ class Command(BaseCommand):
         "rows on (university, name code). "
         "Only gender and mother tongue are imported; the source CSVs' other "
         "columns are read past, because nothing queries them and most of them "
-        "change between a person's surveys (see docs/author-metadata-plan.md). "
+        "change between a person's surveys (see docs/data-processing.md). "
         "Idempotent and safe to rerun, like load_metadata_catalogue and "
         "load_error_taxonomy: survey data gets corrected at source "
         "independently of the schema, so it is not baked into migration "

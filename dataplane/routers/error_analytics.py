@@ -1,6 +1,6 @@
 """
 GET /api/v1/error-frequency, /api/v1/epic, /api/v1/error-summary —
-docs/error-analytics-plan.md. Any authenticated user may search (no staff
+docs/feature-list.md. Any authenticated user may search (no staff
 gate — matches KWIC/Frequency/Collocations/N-grams; no precedent in this
 codebase for treating error data as more sensitive than raw corpus text).
 
@@ -42,7 +42,7 @@ async def search_error_frequency(
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     # The cross-feature secondary metadata filter — one Depends()-able params
     # object instead of four Query() declarations repeated on seven endpoints
-    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # (docs/data-processing.md, dataplane/schemas/metadata.py).
     # Sits here, before the defaulted params, so it needs no `= None` default:
     # FastAPI always constructs it, and a default would imply it can be None.
     metadata: Annotated[MetadataFilterParams, Depends()],
@@ -87,7 +87,7 @@ async def search_epic(
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     # The cross-feature secondary metadata filter — one Depends()-able params
     # object instead of four Query() declarations repeated on seven endpoints
-    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # (docs/data-processing.md, dataplane/schemas/metadata.py).
     # Sits here, before the defaulted params, so it needs no `= None` default:
     # FastAPI always constructs it, and a default would imply it can be None.
     metadata: Annotated[MetadataFilterParams, Depends()],
@@ -121,7 +121,7 @@ async def get_error_summary(
     corpus_ids: Annotated[list[int], Query(min_length=1)],
     # The cross-feature secondary metadata filter — one Depends()-able params
     # object instead of four Query() declarations repeated on seven endpoints
-    # (docs/metadata-catalogue-plan.md, dataplane/schemas/metadata.py).
+    # (docs/data-processing.md, dataplane/schemas/metadata.py).
     # Sits here, before the defaulted params, so it needs no `= None` default:
     # FastAPI always constructs it, and a default would imply it can be None.
     metadata: Annotated[MetadataFilterParams, Depends()],

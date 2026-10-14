@@ -1,5 +1,5 @@
 """
-Error-annotation extraction + aggregation (docs/error-analytics-plan.md).
+Error-annotation extraction + aggregation (docs/feature-list.md).
 Populates ErrorAnnotation (source-of-truth occurrences) and
 DocumentErrorFreq (Tier-2 aggregate, used only by the summary view) from a
 document's already-uploaded content — same delete-then-insert idempotency

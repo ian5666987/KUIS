@@ -22,7 +22,7 @@ ADMIN_PERMISSIONS = [IsAuthenticated, IsAdminUser]
 
 class DocumentMetadataSerializer(serializers.ModelSerializer):
     """Read-only view of a document's catalogue entry
-    (docs/metadata-catalogue-plan.md). Writes go through
+    (docs/data-processing.md). Writes go through
     `load_metadata_catalogue`, never the API — the CSV is the authority, so an
     editable field here would create a second, divergent one.
 
@@ -31,7 +31,7 @@ class DocumentMetadataSerializer(serializers.ModelSerializer):
     no metadata, and why a metadata filter excludes them.
     """
 
-    # Author facets (docs/author-metadata-plan.md), flattened rather than
+    # Author facets (docs/data-processing.md), flattened rather than
     # nested: these are the two author fields the filter exposes, and a nested
     # author object would invite the frontend to read survey columns that are
     # deliberately NOT filterable yet (age, duration, difficulty all vary
@@ -103,7 +103,7 @@ class DocumentListView(ListAPIView):
     ?unassigned=true mirrors corpus_dashboard's `unassigned` context
     variable, used by the assign-modal's document picker.
     ?has_metadata=false/true narrows to documents the metadata catalogue
-    doesn't/does cover (docs/metadata-catalogue-plan.md)."""
+    doesn't/does cover (docs/data-processing.md)."""
 
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated]
