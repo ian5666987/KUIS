@@ -32,7 +32,6 @@ async def search_ngrams(
     match: MatchMode = MatchMode.CONTAINS,
     sort: str = "count",
     dir: Annotated[SortDirection | None, Query()] = None,
-    corrected: bool = False,
     page: int = 1,
     per_page: int = 50,
 ) -> NgramSearchResponse:
@@ -40,7 +39,6 @@ async def search_ngrams(
 
     result = await service.search(
         corpus_ids=corpus_ids,
-        corrected=corrected,
         n=n,
         query=q,
         match_mode=match,

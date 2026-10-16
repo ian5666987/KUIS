@@ -19,7 +19,7 @@ from django.contrib.auth.views import LoginView
 
 #For corpus functionalities
 from .models import Token, Document, Corpus
-from .corpus_parsing import parse_document
+from .corpus_parsing import extract_words
 from collections import Counter
 
 # Explicit async indexing (architecture plan §5, Phase 5) — replaces the
@@ -172,7 +172,6 @@ def _annotated_corpora():
     return Corpus.objects.annotate(
         document_count=Count('documents', distinct=True),
         token_total=Sum('documents__token_count'),
-        token_total_corrected=Sum('documents__token_count_corrected')
     ).order_by('name')
 
 
@@ -332,17 +331,13 @@ def corpus_detail(request, corpus_id):
     field = sort_fields.get(sort, 'title')
     documents = documents.order_by(f"{'-' if direction == 'desc' else ''}{field}")
 
-    totals = corpus.documents.aggregate(
-        tokens=Sum('token_count'),
-        tokens_corrected=Sum('token_count_corrected')
-    )
+    totals = corpus.documents.aggregate(tokens=Sum('token_count'))
 
     return render(request, 'main/corpus_detail.html', {
         'corpus': corpus,
         'documents': documents,
         'document_count': corpus.documents.count(),
         'token_total': totals['tokens'] or 0,
-        'token_total_corrected': totals['tokens_corrected'] or 0,
         'is_selected': corpus.id in _resolve_selected_corpus_ids(request)
     })
 
@@ -463,11 +458,7 @@ def _analysis_context(request, documents, feature=None):
     """Context every analysis page needs for the selector bar on top."""
     selected_ids = _resolve_selected_corpus_ids(request)
 
-    corrected = _is_corrected_mode(request)
-    totals = documents.aggregate(
-        tokens=Sum('token_count'),
-        tokens_corrected=Sum('token_count_corrected')
-    )
+    totals = documents.aggregate(tokens=Sum('token_count'))
 
     return {
         'corpora': _annotated_corpora(),
@@ -477,12 +468,9 @@ def _analysis_context(request, documents, feature=None):
         'corpus_total': Corpus.objects.count(),
         'document_count': documents.count(),
         # Shown in the context bar so the size of what's being analysed is
-        # always on screen, in the mode actually being read.
-        'selection_token_total': (
-            totals['tokens_corrected'] if corrected else totals['tokens']
-        ) or 0,
+        # always on screen.
+        'selection_token_total': totals['tokens'] or 0,
         'feature': feature,
-        'corrected': corrected,
         # Secondary metadata filter state for the context bar
         # (docs/data-processing.md). `metadata_facets` is a list
         # rather than a dict so the template can iterate it without a custom
@@ -547,25 +535,10 @@ def _metadata_facet_context(request):
     return facets
 
 
-def _is_corrected_mode(request):
-    return request.GET.get('corrected') == '1'
-
-
-def _get_word_lists(documents, corrected):
+def _get_word_lists(documents):
     """One word list per document, so collocation/n-gram/KWIC windows never run
-    across a document boundary. Also reports which documents fell back to flat
-    tokenization, so the page can say so instead of silently degrading."""
-    lists = []
-    unstructured = []
-
-    for doc in documents:
-        original_words, corrected_words, structured = parse_document(doc.content)
-        lists.append(corrected_words if corrected else original_words)
-
-        if not structured:
-            unstructured.append(doc.title)
-
-    return lists, unstructured
+    across a document boundary."""
+    return [extract_words(doc.content) for doc in documents]
 
 
 def _require_selection(request):
@@ -693,14 +666,12 @@ def _csv_response(filename, header, rows):
     return response
 
 
-def _count_words(documents, corrected, size=1):
+def _count_words(documents, size=1):
     """Word counts (size=1), adjacent-pair counts (size=2 as tuples) or n-gram
     counts, folded per document so windows never cross a file boundary."""
     freq = Counter()
     total = 0
-    word_lists, unstructured = _get_word_lists(documents, corrected)
-
-    for words in word_lists:
+    for words in _get_word_lists(documents):
         total += len(words)
 
         if size == 1:
@@ -708,7 +679,7 @@ def _count_words(documents, corrected, size=1):
         else:
             freq.update(zip(*[words[i:] for i in range(size)]))
 
-    return freq, total, unstructured
+    return freq, total
 
 
 @login_required
@@ -716,14 +687,8 @@ def analysis_home(request):
     documents = _get_selected_documents(request)
     context = _analysis_context(request, documents, feature='home')
 
-    totals = documents.aggregate(
-        tokens=Sum('token_count'),
-        tokens_corrected=Sum('token_count_corrected')
-    )
-    context.update({
-        'token_total': totals['tokens'] or 0,
-        'token_total_corrected': totals['tokens_corrected'] or 0
-    })
+    totals = documents.aggregate(tokens=Sum('token_count'))
+    context['token_total'] = totals['tokens'] or 0
 
     return render(request, 'main/analysis_home.html', context)
 
@@ -735,13 +700,11 @@ def word_frequency(request):
         return redirect_response
 
     documents = _get_selected_documents(request)
-    corrected = _is_corrected_mode(request)
 
-    freq, total, unstructured = _count_words(documents, corrected)
+    freq, total = _count_words(documents)
 
     context = _analysis_context(request, documents, feature='word_frequency')
     context.update(_rank_counter(request, freq, total))
-    context['unstructured'] = unstructured
 
     return render(request, 'main/word_frequency.html', context)
 
@@ -753,7 +716,7 @@ def word_frequency_export_csv(request):
         return redirect_response
 
     documents = _get_selected_documents(request)
-    freq, total, _ = _count_words(documents, _is_corrected_mode(request))
+    freq, total = _count_words(documents)
     rows = _sorted_rows_for_export(request, freq)
 
     return _csv_response(
@@ -771,13 +734,11 @@ def collocations(request):
         return redirect_response
 
     documents = _get_selected_documents(request)
-    corrected = _is_corrected_mode(request)
 
-    freq, total, unstructured = _count_words(documents, corrected, size=2)
+    freq, total = _count_words(documents, size=2)
 
     context = _analysis_context(request, documents, feature='collocations')
     context.update(_rank_counter(request, freq, total))
-    context['unstructured'] = unstructured
 
     return render(request, 'main/collocations.html', context)
 
@@ -789,7 +750,7 @@ def collocations_export_csv(request):
         return redirect_response
 
     documents = _get_selected_documents(request)
-    freq, total, _ = _count_words(documents, _is_corrected_mode(request), size=2)
+    freq, total = _count_words(documents, size=2)
     rows = _sorted_rows_for_export(request, freq)
 
     return _csv_response(
@@ -822,17 +783,15 @@ def ngrams(request):
         return redirect_response
 
     documents = _get_selected_documents(request)
-    corrected = _is_corrected_mode(request)
     n = _get_ngram_size(request)
 
-    freq, total, unstructured = _count_words(documents, corrected, size=n)
+    freq, total = _count_words(documents, size=n)
 
     context = _analysis_context(request, documents, feature='ngrams')
     context.update(_rank_counter(request, freq, total))
     context.update({
         'n': n,
         'ngram_sizes': NGRAM_SIZES,
-        'unstructured': unstructured
     })
 
     return render(request, 'main/ngrams.html', context)
@@ -846,7 +805,7 @@ def ngrams_export_csv(request):
 
     documents = _get_selected_documents(request)
     n = _get_ngram_size(request)
-    freq, total, _ = _count_words(documents, _is_corrected_mode(request), size=n)
+    freq, total = _count_words(documents, size=n)
     rows = _sorted_rows_for_export(request, freq)
 
     return _csv_response(
@@ -922,20 +881,18 @@ def _get_window(request):
     return window, None
 
 
-def _kwic_results(documents, query, window, corrected):
+def _kwic_results(documents, query, window):
     """Concordance lines across every selected document, each tagged with the
     document it came from."""
     results = []
 
     if not query:
-        return results, []
+        return results
 
     query_tokens = query.split()
     n = len(query_tokens)
 
-    word_lists, unstructured = _get_word_lists(documents, corrected)
-
-    for doc, words in zip(documents, word_lists):
+    for doc, words in zip(documents, _get_word_lists(documents)):
         for i in range(len(words) - n + 1):
             if words[i:i+n] == query_tokens:
                 results.append({
@@ -945,7 +902,7 @@ def _kwic_results(documents, query, window, corrected):
                     "right": words[i+n:i+n+window]
                 })
 
-    return results, unstructured
+    return results
 
 
 def _sort_kwic(results, sort):
@@ -980,9 +937,8 @@ def kwic(request):
     query = request.GET.get("q", "").strip().lower()
     window, window_error = _get_window(request)
     sort = request.GET.get("sort", "center")
-    corrected = _is_corrected_mode(request)
 
-    results, unstructured = _kwic_results(documents, query, window, corrected)
+    results = _kwic_results(documents, query, window)
     _sort_kwic(results, sort)
 
     paginator = Paginator(results, _get_per_page(request))
@@ -1003,7 +959,6 @@ def kwic(request):
         "kwic_sorts": KWIC_SORTS,
         "per_page": _get_per_page(request),
         "per_page_choices": PER_PAGE_CHOICES,
-        "unstructured": unstructured
     })
 
     return render(request, "main/kwic.html", context)
@@ -1019,9 +974,8 @@ def kwic_export_csv(request):
 
     query = request.GET.get("q", "").strip().lower()
     window, _ = _get_window(request)
-    corrected = _is_corrected_mode(request)
 
-    results, _unstructured = _kwic_results(documents, query, window, corrected)
+    results = _kwic_results(documents, query, window)
     _sort_kwic(results, request.GET.get("sort", "center"))
 
     return _csv_response(
@@ -1039,7 +993,7 @@ def kwic_export_csv(request):
     )
 
 
-def _word_index_matches(documents, word, mode):
+def _word_index_matches(documents, word):
     """(document_id, position) for every hit, in corpus order. Cheap to page
     over: nothing is hydrated until a page is actually rendered.
 
@@ -1055,13 +1009,13 @@ def _word_index_matches(documents, word, mode):
 
     return list(
         Token.objects
-        .filter(word_type__form=word, mode=mode, document_id__in=doc_ids)
+        .filter(word_type__form=word, document_id__in=doc_ids)
         .order_by('document_id', 'position')
         .values_list('document_id', 'position')
     )
 
 
-def _hydrate_word_index(refs, mode, window):
+def _hydrate_word_index(refs, window):
     """Builds concordance lines for the given hits with one query per document,
     rather than two per hit."""
     if not refs:
@@ -1073,7 +1027,7 @@ def _hydrate_word_index(refs, mode, window):
     words_by_doc = {
         doc_id: list(
             Token.objects
-            .filter(document_id=doc_id, mode=mode)
+            .filter(document_id=doc_id)
             .order_by('position')
             .values_list('word_type__form', flat=True)
         )
@@ -1104,10 +1058,8 @@ def kwic_search(request):
 
     word = request.GET.get('word', '').lower().strip()
     window, window_error = _get_window(request)
-    corrected = _is_corrected_mode(request)
-    mode = Token.CORRECTED if corrected else Token.ORIGINAL
 
-    refs = _word_index_matches(documents, word, mode)
+    refs = _word_index_matches(documents, word)
 
     paginator = Paginator(refs, _get_per_page(request))
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -1115,7 +1067,7 @@ def kwic_search(request):
     context = _analysis_context(request, documents, feature='kwic_search')
     context.update({
         "word": word,
-        "results": _hydrate_word_index(list(page_obj.object_list), mode, window),
+        "results": _hydrate_word_index(list(page_obj.object_list), window),
         "page_obj": page_obj,
         "paginator": paginator,
         "result_count": len(refs),
@@ -1140,9 +1092,7 @@ def kwic_search_export_csv(request):
 
     word = request.GET.get('word', '').lower().strip()
     window, _ = _get_window(request)
-    mode = Token.CORRECTED if _is_corrected_mode(request) else Token.ORIGINAL
-
-    rows = _hydrate_word_index(_word_index_matches(documents, word, mode), mode, window)
+    rows = _hydrate_word_index(_word_index_matches(documents, word), window)
 
     return _csv_response(
         'kuis_word_index.csv',

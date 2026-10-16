@@ -38,17 +38,15 @@ def compute_document_word_freq(document_id: int) -> int:
     is bounded (see DocumentWordFreq's docstring in main/models.py)."""
     DocumentWordFreq.objects.filter(document_id=document_id).delete()
 
-    rows = []
-    for mode in (Token.ORIGINAL, Token.CORRECTED):
-        counts = (
-            Token.objects.filter(document_id=document_id, mode=mode)
-            .values("word_type_id")
-            .annotate(count=Count("id"))
-        )
-        rows.extend(
-            DocumentWordFreq(document_id=document_id, word_type_id=row["word_type_id"], mode=mode, count=row["count"])
-            for row in counts
-        )
+    counts = (
+        Token.objects.filter(document_id=document_id)
+        .values("word_type_id")
+        .annotate(count=Count("id"))
+    )
+    rows = [
+        DocumentWordFreq(document_id=document_id, word_type_id=row["word_type_id"], count=row["count"])
+        for row in counts
+    ]
 
     DocumentWordFreq.objects.bulk_create(rows, batch_size=5000)
     return len(rows)
@@ -56,30 +54,29 @@ def compute_document_word_freq(document_id: int) -> int:
 
 @app.task
 def compute_document_ngrams(document_id: int) -> int:
-    """TOP-K per (document, n, mode) — see this module's TOP_K_PER_DOCUMENT/
-    FREQUENCY_FLOOR. Windows never cross a document boundary (each mode's
+    """TOP-K per (document, n) — see this module's TOP_K_PER_DOCUMENT/
+    FREQUENCY_FLOOR. Windows never cross a document boundary (the
     word_type_id sequence is pulled and windowed independently per
     document, matching main/views.py::_get_word_lists' same rule for the
     live-parse path)."""
     DocumentNgram.objects.filter(document_id=document_id).delete()
 
+    word_type_ids = list(
+        Token.objects.filter(document_id=document_id).order_by("position").values_list("word_type_id", flat=True)
+    )
+
     rows = []
-    for mode in (Token.ORIGINAL, Token.CORRECTED):
-        word_type_ids = list(
-            Token.objects.filter(document_id=document_id, mode=mode).order_by("position").values_list("word_type_id", flat=True)
+    for n in NGRAM_SIZES:
+        if len(word_type_ids) < n:
+            continue
+
+        counter = Counter(zip(*(word_type_ids[i:] for i in range(n))))
+        top = [(ids, count) for ids, count in counter.most_common(TOP_K_PER_DOCUMENT) if count >= FREQUENCY_FLOOR]
+
+        rows.extend(
+            DocumentNgram(document_id=document_id, n=n, word_type_ids=list(ids), count=count)
+            for ids, count in top
         )
-
-        for n in NGRAM_SIZES:
-            if len(word_type_ids) < n:
-                continue
-
-            counter = Counter(zip(*(word_type_ids[i:] for i in range(n))))
-            top = [(ids, count) for ids, count in counter.most_common(TOP_K_PER_DOCUMENT) if count >= FREQUENCY_FLOOR]
-
-            rows.extend(
-                DocumentNgram(document_id=document_id, n=n, word_type_ids=list(ids), mode=mode, count=count)
-                for ids, count in top
-            )
 
     DocumentNgram.objects.bulk_create(rows, batch_size=5000)
     return len(rows)

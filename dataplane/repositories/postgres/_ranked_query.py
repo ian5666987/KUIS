@@ -12,7 +12,7 @@ Ports main/views.py::_count_words + _rank_counter onto SQL:
   - _count_words builds a Counter of n-length windows per document (never
     crossing a document boundary — docs/feature-list.md §10) via
     `zip(*[words[i:] for i in range(size)])`. The SQL equivalent is an
-    N-way self-join on Token, keyed by (document_id, mode), joined on
+    N-way self-join on Token, keyed by document_id, joined on
     position offsets — the same technique
     dataplane/repositories/postgres/kwic_repository.py uses to MATCH a
     specific phrase, generalized here to ENUMERATE every window and
@@ -38,11 +38,11 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.models.tables import token, word_type
-from dataplane.repositories.base import MatchMode, Mode, RankedPage, SortDirection
+from dataplane.repositories.base import MatchMode, RankedPage, SortDirection
 from dataplane.repositories.postgres._ranked_pagination import paginate_sql_source
 
 
-def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
+def _ngram_source_query(document_ids: list[int], n: int):
     """(item, count) for every distinct n-length window across the given
     documents — item is the window's words space-joined (a single word when
     n=1). Not yet filtered, sorted, or paginated; see compute_ranked_page."""
@@ -58,7 +58,6 @@ def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
             t,
             and_(
                 t.c.document_id == base.c.document_id,
-                t.c.mode == base.c.mode,
                 t.c.position == base.c.position + i,
             ),
         ).join(wt, wt.c.id == t.c.word_type_id)
@@ -69,7 +68,7 @@ def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
     return (
         select(item_expr.label("item"), func.count().label("count"))
         .select_from(from_clause)
-        .where(and_(base.c.document_id.in_(document_ids), base.c.mode == mode.value))
+        .where(base.c.document_id.in_(document_ids))
         .group_by(*word_cols)
     )
 
@@ -77,7 +76,6 @@ def _ngram_source_query(document_ids: list[int], mode: Mode, n: int):
 async def compute_ranked_page(
     session: AsyncSession,
     document_ids: list[int],
-    mode: Mode,
     n: int,
     query: str | None,
     match_mode: MatchMode,
@@ -89,7 +87,7 @@ async def compute_ranked_page(
     if not document_ids:
         return RankedPage(rows=[], result_count=0, type_count=0, token_total=0)
 
-    source = _ngram_source_query(document_ids, mode, n).subquery()
+    source = _ngram_source_query(document_ids, n).subquery()
 
     # token_total is the raw WORD occurrence count, independent of n — used
     # for "per million tokens" normalization the same way regardless of
@@ -104,7 +102,7 @@ async def compute_ranked_page(
         await session.execute(
             select(func.count())
             .select_from(token)
-            .where(and_(token.c.document_id.in_(document_ids), token.c.mode == mode.value))
+            .where(token.c.document_id.in_(document_ids))
         )
     ).scalar_one()
 

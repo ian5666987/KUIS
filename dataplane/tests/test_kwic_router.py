@@ -27,7 +27,7 @@ def test_single_word_search_matches_repository_behavior(client, auth_headers, se
     assert body["result_count"] == 4
     assert len(body["results"]) == 4
     assert body["window"] == 2
-    assert body["corrected"] is False
+    assert "corrected" not in body
     assert all(hit["keyword"] == ["nasi"] for hit in body["results"])
 
 
@@ -44,17 +44,15 @@ def test_phrase_search(client, auth_headers, seeded_corpus):
     assert all(hit["keyword"] == ["nasi", "goreng"] for hit in body["results"])
 
 
-def test_corrected_mode(client, auth_headers, seeded_corpus):
+def test_correction_text_is_not_searchable(client, auth_headers, seeded_corpus):
     response = client.get(
         "/api/v1/kwic",
-        params={"corpus_ids": [seeded_corpus["corpus_id"]], "q": "tetapi", "corrected": True},
+        params={"corpus_ids": [seeded_corpus["corpus_id"]], "q": "tetapi"},
         headers=auth_headers,
     )
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["corrected"] is True
-    assert body["result_count"] == 1
+    assert response.json()["result_count"] == 0
 
 
 def test_window_is_clamped_to_the_documented_range(client, auth_headers, seeded_corpus):

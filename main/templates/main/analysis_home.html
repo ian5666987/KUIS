@@ -9,8 +9,8 @@
   <div class="page-head">
     <h1>Analysis</h1>
     <!-- <p>
-      Choose the corpora once; every feature below reads the same selection and
-      text mode until you change them.
+      Choose the corpora once; every feature below reads the same selection
+      until you change it.
     </p> -->
   </div>
 
@@ -32,14 +32,9 @@
         <div class="stats__note">deduplicated across corpora</div>
       </div>
       <div class="stats__item">
-        <div class="stats__label">Tokens · original</div>
+        <div class="stats__label">Tokens</div>
         <div class="stats__value">{{ token_total|intcomma }}</div>
         <div class="stats__note">text as written</div>
-      </div>
-      <div class="stats__item">
-        <div class="stats__label">Tokens · corrected</div>
-        <div class="stats__value">{{ token_total_corrected|intcomma }}</div>
-        <div class="stats__note">with corrections applied</div>
       </div>
     </div>
 

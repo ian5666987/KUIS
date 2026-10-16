@@ -47,14 +47,12 @@ def _mark_failed(document: Document, reason: str, detail: str) -> None:
     document.status_reason = reason
     document.status_detail = detail
     document.token_count = 0
-    document.token_count_corrected = 0
     document.save(
         update_fields=[
             "status",
             "status_reason",
             "status_detail",
             "token_count",
-            "token_count_corrected",
         ]
     )
 
@@ -74,7 +72,7 @@ def index_document(document_id: int) -> int:
         Token.objects.filter(document=document).delete()
 
         # Structural check BEFORE tokenizing. main/corpus_parsing.py's
-        # parse_document falls back to flat tokenization for anything it can't
+        # extract_words falls back to flat tokenization for anything it can't
         # parse as corpus XML, which silently turns a malformed export's own
         # markup into "words" — a healthy-looking token count over nonsense.
         # Failing here is what makes that case visible instead.
@@ -84,7 +82,7 @@ def index_document(document_id: int) -> int:
             return document_id
 
         content_hash = compute_content_hash(document.content)
-        token_count, token_count_corrected = build_tokens(document)
+        token_count = build_tokens(document)
 
         # Parsed cleanly and still produced nothing — e.g. a <body> containing
         # only whitespace or only empty elements. Not a crash, but not a
@@ -95,7 +93,6 @@ def index_document(document_id: int) -> int:
             return document_id
 
         document.token_count = token_count
-        document.token_count_corrected = token_count_corrected
         document.content_hash = content_hash
         # Identical to content_hash right now (tokenization just ran
         # against this exact content) — kept as a separate field because
@@ -113,7 +110,6 @@ def index_document(document_id: int) -> int:
         document.save(
             update_fields=[
                 "token_count",
-                "token_count_corrected",
                 "content_hash",
                 "tokenized_hash",
                 "tokenizer_version",

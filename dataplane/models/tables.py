@@ -10,16 +10,15 @@ Table/column names below were confirmed against the real Django models via
 introspection (`Model._meta.db_table` / `Field.column`), not guessed:
 
     Document          -> main_document          (id, title, content, uploaded_at,
-                                                   user_id, token_count,
-                                                   token_count_corrected, created_at,
+                                                   user_id, token_count, created_at,
                                                    status, status_reason, status_detail,
                                                    content_hash, tokenized_hash,
                                                    tokenizer_version)
     Corpus            -> main_corpus            (id, name, description, created_by_id, created_at)
-    Token             -> main_token             (id, document_id, word_type_id, position, mode)
+    Token             -> main_token             (id, document_id, word_type_id, position)
     WordType          -> main_wordtype          (id, form)
-    DocumentWordFreq  -> main_documentwordfreq  (id, document_id, word_type_id, mode, count)
-    DocumentNgram     -> main_documentngram     (id, document_id, n, word_type_ids, mode, count)
+    DocumentWordFreq  -> main_documentwordfreq  (id, document_id, word_type_id, count)
+    DocumentNgram     -> main_documentngram     (id, document_id, n, word_type_ids, count)
     Corpus.documents (M2M) -> main_corpus_documents (id, corpus_id, document_id)
 
 CI guard (architecture plan §2's "schema drift" caution): if a Django
@@ -66,7 +65,6 @@ document = Table(
     Column("uploaded_at", DateTime(timezone=True)),
     Column("user_id", BigInteger, nullable=True),
     Column("token_count", Integer),
-    Column("token_count_corrected", Integer),
     Column("created_at", DateTime(timezone=True)),
     Column("status", String(10)),
     Column("status_reason", String(32)),
@@ -106,7 +104,6 @@ token = Table(
     Column("document_id", BigInteger),
     Column("word_type_id", BigInteger),
     Column("position", Integer),
-    Column("mode", String(10)),
 )
 
 word_type = Table(
@@ -122,7 +119,6 @@ document_word_freq = Table(
     Column("id", BigInteger, primary_key=True),
     Column("document_id", BigInteger),
     Column("word_type_id", BigInteger),
-    Column("mode", String(10)),
     Column("count", Integer),
 )
 
@@ -133,7 +129,6 @@ document_ngram = Table(
     Column("document_id", BigInteger),
     Column("n", SmallInteger),
     Column("word_type_ids", JSON),
-    Column("mode", String(10)),
     Column("count", Integer),
 )
 

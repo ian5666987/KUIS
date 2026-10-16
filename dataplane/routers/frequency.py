@@ -37,7 +37,6 @@ async def search_frequency(
     match: MatchMode = MatchMode.CONTAINS,
     sort: str = "count",
     dir: Annotated[SortDirection | None, Query()] = None,
-    corrected: bool = False,
     page: int = 1,
     per_page: int = 50,
 ) -> RankedSearchResponse:
@@ -50,7 +49,6 @@ async def search_frequency(
 
     result = await service.search(
         corpus_ids=corpus_ids,
-        corrected=corrected,
         query=q,
         match_mode=match,
         sort=sort,

@@ -1,8 +1,8 @@
 {% comment %} Analysis context bar — the one component that appears on every analysis page.
 
-   It answers two questions that must never require scrolling or navigating to
-   answer: *which corpora is this running over* and *am I reading original or
-   corrected text*. Both controls live in a single GET form; the rest of the
+   It answers the question that must never require scrolling or navigating to
+   answer: *which corpora is this running over*. Its controls live in a single
+   GET form; the rest of the
    feature's parameters ride along as hidden inputs, so changing corpora never
    wipes a query, an n-gram size or a sort.
 
@@ -21,7 +21,7 @@
   {% comment %} The metadata facet params must be excluded here: they have real
      controls in the panel below, so re-emitting them as hidden inputs would
      submit every value twice (docs/data-processing.md). {% endcomment %}
-  {% hidden_params exclude="corpus,corpus_selection,corrected,page,university,year,grade,gender,mother_tongue,name_code" %}
+  {% hidden_params exclude="corpus,corpus_selection,page,university,year,grade,gender,mother_tongue,name_code" %}
 
   <div class="context__summary">
 
@@ -48,22 +48,6 @@
       </span>
     </div>
 
-    <div class="context__sep" aria-hidden="true"></div>
-
-    <div class="context__item">
-      <span class="context__label" id="ctx-mode">Text mode</span>
-      {% comment %} Radios rather than a checkbox: "Original" is a real choice, not the
-         absence of one, and both readings are always visible. {% endcomment %}
-      <div class="seg" role="group" aria-labelledby="ctx-mode">
-        <input type="radio" id="mode-original" name="corrected" value="0"
-               {% if not corrected %}checked{% endif %} data-autosubmit>
-        <label for="mode-original">Original</label>
-
-        <input type="radio" id="mode-corrected" name="corrected" value="1"
-               {% if corrected %}checked{% endif %} data-autosubmit>
-        <label for="mode-corrected">Corrected</label>
-      </div>
-    </div>
 
     <div class="context__item" style="margin-left:auto; display:flex; gap:10px; align-items:center;">
       <span class="working" role="status">Working…</span>
@@ -73,12 +57,6 @@
   </div>
 
   <div class="context__panel" id="corpus-panel">
-    <!-- <p class="text-sm text-muted" style="margin-bottom:10px; max-width:70ch;">
-      <strong>Original</strong> counts the learner text as written.
-      <strong>Corrected</strong> substitutes the correction recorded on each annotated
-      segment. Files without segment annotations read the same in both modes.
-    </p> -->
-
     {% include 'main/components/corpus_picker.html' %}
 
     {% include 'main/components/metadata_picker.html' %}

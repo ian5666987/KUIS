@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dataplane.repositories.base import (
     MatchMode,
     MetadataFilter,
-    Mode,
     NgramRepository,
     RankedRow,
     SortDirection,
@@ -47,7 +46,6 @@ class NgramService:
     async def search(
         self,
         corpus_ids: list[int],
-        corrected: bool,
         n: int,
         query: str | None,
         match_mode: MatchMode,
@@ -60,7 +58,6 @@ class NgramService:
         n = self._normalize_n(n)
         per_page = normalize_per_page(per_page)
         page = max(page, 1)
-        mode = Mode.CORRECTED if corrected else Mode.ORIGINAL
 
         # The secondary metadata filter is threaded in here rather than into the
         # repository call: it narrows which documents are in scope, which is a
@@ -69,7 +66,7 @@ class NgramService:
         document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
         offset = (page - 1) * per_page
 
-        result = await self._repository.ranked(document_ids, mode, n, query, match_mode, sort, direction, per_page, offset)
+        result = await self._repository.ranked(document_ids, n, query, match_mode, sort, direction, per_page, offset)
 
         return RankedSearchResult(
             rows=result.rows,

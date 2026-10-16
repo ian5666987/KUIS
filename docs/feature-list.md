@@ -14,8 +14,8 @@ A corpus-linguistics application for an Indonesian-language **learner corpus**.
 Admins upload XML files (plain text plus `<segment>` error annotations carrying
 corrections) and group them into named **corpora**. Registered users then run
 reports across any multi-select of those corpora — word frequency, collocations,
-n-grams, KWIC, and error analytics — each with an *original vs. corrected* text
-toggle and each narrowable by a secondary per-document **metadata filter**
+n-grams, KWIC, and error analytics — all over the text as written, and each
+narrowable by a secondary per-document **metadata filter**
 (university / year / grade / name code, plus the writer's gender and mother
 tongue).
 
@@ -89,8 +89,9 @@ Access column: **anyone** · **registered** (any logged-in active user) ·
 ## 4. Analysis features
 
 Available on both surfaces unless noted. Every one of them is scoped by the
-corpus multi-select **and** the metadata filter, and respects the
-original/corrected text mode.
+corpus multi-select **and** the metadata filter, and reads the text as written
+(the corrected text mode was removed to save space; a segment's correction is
+still shown in error analytics/EPIC).
 
 | Feature | Description | Endpoints / key files |
 |---|---|---|
@@ -322,11 +323,11 @@ main/                          # Django app — back office + both auth surfaces
   static/main/kuis.css — the whole interface: design tokens, then components
   static/main/kuis.js  — optional enhancements only; nothing depends on it
   management/commands/ — see §7
-  migrations/          — 0001-0016 (0006 and 0008 are data migrations)
+  migrations/          — 0001-0017 (0006 and 0008 are data migrations; 0017 deletes the corrected token rows)
   templates/
     main/base.html               — layout, nav, messages, auth conditionals
     main/components/             — the shared UI vocabulary (§9)
-      context_bar.html           — corpus selection + text mode + metadata
+      context_bar.html           — corpus selection + metadata
       corpus_picker.html, metadata_picker.html, assign_modal.html,
       analysis_nav.html, frequency_results.html, concordance_results.html,
       concordance_modal.html, sort_header.html, pagination.html,
@@ -421,7 +422,7 @@ of that runs and the existing document's title/uploader are left alone. Detail:
 
 `main/templates/main/components/context_bar.html` is included at the top of every
 analysis template. It holds the state that applies to every feature — **which
-corpora**, **original vs corrected**, and **the metadata facets** — and is what
+corpora** and **the metadata facets** — and is what
 makes them survive navigation:
 
 - A `method="get"` form with **no `action`**, so it submits back to whatever
@@ -429,9 +430,8 @@ makes them survive navigation:
 - It always carries the hidden `corpus_selection=1` marker. Unticking every box
   submits no `corpus` params at all, otherwise indistinguishable from "form not
   submitted" — without the marker a selection could never be cleared.
-- Text mode is a pair of radios (`corrected=0|1`), not a checkbox: "original" is a
-  real choice, not the absence of one. They auto-submit; corpus changes are applied
-  with a button, because a reload per tick is slow and disorienting.
+- Corpus changes are applied with a button rather than auto-submitting, because a
+  reload per tick is slow and disorienting.
 - `views._resolve_selected_corpus_ids` writes the corpus result to
   `request.session['selected_corpus_ids']`, so every other feature picks it up with
   no URL params. Ids also travel in the query string when submitted, so feature
@@ -477,7 +477,7 @@ filter come along for free. A new table must be mirrored in `models/tables.py`
 **and** registered in all three places in `tests/test_schema_drift.py`.
 
 **UI conventions worth keeping.** Numbers are right-aligned and tabular; sort
-direction and text mode are carried by a glyph and `aria-sort`/`aria-current`,
+direction and the current page are carried by a glyph and `aria-sort`/`aria-current`,
 never by colour alone; loading, empty and error are three distinct states
 (`state.html`, the `.notice` variants, `body.is-loading`), because "still working"
 and "nothing found" must never look the same. No component rule hardcodes a

@@ -21,8 +21,8 @@
 corpus. Admins upload XML files (plain text plus `<segment>` error annotations
 with corrections) and group them into named **corpora**; registered users run
 reports across any multi-select of those corpora — word frequency, collocations,
-n-grams, KWIC, and error analytics — each with an original/corrected text toggle
-and a secondary per-document metadata filter.
+n-grams, KWIC, and error analytics — over the text as written, each with a
+secondary per-document metadata filter.
 
 ```
 KUIS/                                   KUIS-FE/

@@ -68,9 +68,8 @@
           <div class="stats__note">{{ selected_corpus_count }} {{ selected_corpus_count|pluralize:"corpus,corpora" }}</div>
         </div>
         <div class="stats__item">
-          <div class="stats__label">Text mode</div>
-          <div class="stats__value" style="font-size:16px;">{{ corrected|yesno:"Corrected,Original" }}</div>
-          <div class="stats__note">{{ selection_token_total|intcomma }} tokens</div>
+          <div class="stats__label">Tokens</div>
+          <div class="stats__value">{{ selection_token_total|intcomma }}</div>
         </div>
       </div> -->
 
@@ -96,7 +95,7 @@
       {% if result_count %}
         {% include 'main/components/concordance_results.html' with rows=results %}
       {% else %}
-        {% include 'main/components/state.html' with title='That word form is not indexed' body='It does not occur in the selected corpora in this text mode. The index is built when a file is uploaded; if a file’s text was edited afterwards, an administrator may need to rebuild it.' %}
+        {% include 'main/components/state.html' with title='That word form is not indexed' body='It does not occur in the selected corpora. The index is built when a file is uploaded; if a file’s text was edited afterwards, an administrator may need to rebuild it.' %}
       {% endif %}
 
     {% else %}

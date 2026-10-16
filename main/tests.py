@@ -35,8 +35,7 @@ PLAIN_TEXT = "saya suka nasi dan saya suka teh"
 # A <segment> nested inside another <segment> — the data's way of
 # representing overlapping errors (docs/feature-list.md), modeled
 # after the real pattern in info/KUIS2023FUA201-Eror.xml. Outer segment
-# uses capital 'Correction' (the one rule the corrected token stream has
-# always honored); nested segment has no parent= attribute, mirroring real
+# uses capital 'Correction'; nested segment has no parent= attribute, mirroring real
 # sample data where the explicit attribute and structural nesting diverge.
 NESTED_CORPUS_XML = """<document>
   <header><textfile>t</textfile><lang>indonesian</lang></header>
@@ -48,9 +47,8 @@ saya suka <segment id='3' features='eror;gramatikal;frasa-nomina;urtfn' Correcti
 # Same nested shape, but the outer segment's correction is spelled with a
 # lowercase attribute — real exports use both castings, consistently within
 # a given file (info/OU 2023 Beta 201.xml and info/TUFS 2023 KOMA 209.xml are
-# all-lowercase; info/KUIS2022NAMI3.xml is all-capital). Both the token
-# corrected-stream and ErrorAnnotation.correction_text resolve either
-# spelling.
+# all-lowercase; info/KUIS2022NAMI3.xml is all-capital).
+# ErrorAnnotation.correction_text resolves either spelling.
 LOWERCASE_CORRECTION_XML = """<document>
   <header><textfile>t</textfile><lang>indonesian</lang></header>
   <body>
@@ -162,25 +160,23 @@ class SelectionTests(ExplorerTestCase):
         self.assertEqual(response.context['document_count'], 2)
 
 
-class TextModeTests(ExplorerTestCase):
-    def test_corrected_mode_substitutes_the_correction(self):
+class TextAsWrittenTests(ExplorerTestCase):
+    def test_counts_the_text_as_written_not_the_correction(self):
         self.select(self.corpus)
 
         original = self.client.get(reverse('word_frequency'), {'q': 'tapi', 'match': 'exact'})
-        corrected = self.client.get(
-            reverse('word_frequency'), {'q': 'tetapi', 'match': 'exact', 'corrected': '1'}
-        )
+        correction = self.client.get(reverse('word_frequency'), {'q': 'tetapi', 'match': 'exact'})
 
         self.assertEqual(list(original.context['rows']), [('tapi', 1)])
-        self.assertEqual(list(corrected.context['rows']), [('tetapi', 1)])
+        self.assertEqual(list(correction.context['rows']), [])
 
-    def test_unannotated_files_are_reported_in_corrected_mode(self):
+    def test_corrected_param_is_ignored(self):
+        # Old bookmarked/shared links may still carry ?corrected=1.
         self.select(self.corpus)
 
-        response = self.client.get(reverse('word_frequency'), {'corrected': '1'})
+        response = self.client.get(reverse('word_frequency'), {'q': 'tapi', 'match': 'exact', 'corrected': '1'})
 
-        self.assertIn('plain.txt', response.context['unstructured'])
-        self.assertContains(response, 'carry no segment annotations')
+        self.assertEqual(list(response.context['rows']), [('tapi', 1)])
 
 
 class ResultTableTests(ExplorerTestCase):
@@ -627,7 +623,7 @@ class CorpusApiTests(ExplorerTestCase):
 
         self.assertEqual(empty['document_count'], 0)
         self.assertEqual(empty['token_total'], 0)
-        self.assertEqual(empty['token_total_corrected'], 0)
+        self.assertNotIn('token_total_corrected', empty)
 
 
 class DocumentIngestTests(TestCase):
@@ -698,7 +694,7 @@ class WorkerTaskTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.status, Document.STATUS_READY)
         self.assertEqual(doc.token_count, 10)  # saya suka makan nasi tapi saya tidak suka nasi goreng
-        self.assertTrue(doc.tokens.filter(mode='original').exists())
+        self.assertEqual(doc.tokens.count(), 10)
         self.assertIsNotNone(doc.content_hash)
         self.assertEqual(doc.content_hash, doc.tokenized_hash)
         self.assertEqual(doc.tokenizer_version, 1)
@@ -716,17 +712,14 @@ class WorkerTaskTests(TestCase):
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
         index_document(doc.id)
 
-        first_token = doc.tokens.filter(mode='original', position=0).get()
+        first_token = doc.tokens.filter(position=0).get()
         self.assertEqual(first_token.word_type.form, 'saya')
 
-        # Corrected stream substitutes the segment's Correction attribute —
-        # same rule main/corpus_parsing.py has always implemented, now
-        # reached through word_type instead of a `word` column.
-        corrected_forms = list(
-            doc.tokens.filter(mode='corrected').order_by('position').values_list('word_type__form', flat=True)
-        )
-        self.assertIn('tetapi', corrected_forms)
-        self.assertNotIn('tapi', corrected_forms)
+        # The segment's text is tokenized as written; its Correction
+        # attribute is not tokenized at all.
+        forms = list(doc.tokens.order_by('position').values_list('word_type__form', flat=True))
+        self.assertIn('tapi', forms)
+        self.assertNotIn('tetapi', forms)
 
     def test_reindexing_replaces_rather_than_duplicates_tokens(self):
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
@@ -743,12 +736,12 @@ class WorkerTaskTests(TestCase):
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
         index_document(doc.id)  # chains both aggregate tasks internally
 
-        word_freqs = DocumentWordFreq.objects.filter(document=doc, mode='original')
+        word_freqs = DocumentWordFreq.objects.filter(document=doc)
         self.assertTrue(word_freqs.exists())
         saya_freq = word_freqs.get(word_type__form='saya')
-        self.assertEqual(saya_freq.count, 2)  # "saya" appears twice in CORPUS_XML's original stream
+        self.assertEqual(saya_freq.count, 2)  # "saya" appears twice in CORPUS_XML
 
-        ngrams = DocumentNgram.objects.filter(document=doc, mode='original', n=2)
+        ngrams = DocumentNgram.objects.filter(document=doc, n=2)
         self.assertTrue(ngrams.exists())
 
     def test_unindexed_document_never_reports_itself_ready(self):
@@ -766,7 +759,7 @@ class WorkerTaskTests(TestCase):
 
     def test_malformed_xml_fails_instead_of_tokenizing_its_own_markup(self):
         # Unescaped '&' — the single most common breakage in a real export.
-        # parse_document falls back to flat tokenization here, which would
+        # extract_words falls back to flat tokenization here, which would
         # otherwise report a healthy token count built from the tag names.
         broken = CORPUS_XML.replace('saya suka', 'saya & suka')
         doc = Document.objects.create(title='broken.xml', content=broken)
@@ -1423,32 +1416,19 @@ class CorpusParsingTests(TestCase):
     (docs/feature-list.md). The pre-fix bug: only direct children of
     <body> were visited, so a <segment> nested inside another <segment> — the
     data's way of representing overlapping errors — contributed nothing to
-    either stream. NESTED_CORPUS_XML/LOWERCASE_CORRECTION_XML are modeled on
+    the token stream. NESTED_CORPUS_XML/LOWERCASE_CORRECTION_XML are modeled on
     the real pattern in info/KUIS2023FUA201-Eror.xml (cross-checked directly
     in LoadErrorTaxonomyCommandTests below)."""
 
-    def test_nested_segment_text_reaches_the_original_stream(self):
-        from .corpus_parsing import extract_word_streams
+    def test_nested_segment_text_reaches_the_stream(self):
+        from .corpus_parsing import extract_words
 
-        original_words, corrected_words = extract_word_streams(NESTED_CORPUS_XML)
+        self.assertEqual(extract_words(NESTED_CORPUS_XML), ['saya', 'suka', 'goreng', 'nasi', 'sekali'])
 
-        self.assertEqual(original_words, ['saya', 'suka', 'goreng', 'nasi', 'sekali'])
-        self.assertEqual(corrected_words, ['saya', 'suka', 'nasi', 'goreng', 'sekali'])
+    def test_correction_attribute_is_not_tokenized(self):
+        from .corpus_parsing import extract_words
 
-    def test_corrected_stream_reads_correction_case_insensitively(self):
-        # A lowercase `correction=` must be SUBSTITUTED into the corrected
-        # stream, not dropped. Reading only the capital spelling used to
-        # delete the error span and put nothing back ('sayang' alone here),
-        # which left a hole at every annotated error in the all-lowercase
-        # exports (info/OU 2023 Beta 201.xml, info/OU 2023 JIDA 201.xml,
-        # info/TUFS 2023 KOMA 209.xml) — the casing is per-file, so that hit
-        # every error in those documents, not the odd segment.
-        from .corpus_parsing import extract_word_streams
-
-        original_words, corrected_words = extract_word_streams(LOWERCASE_CORRECTION_XML)
-
-        self.assertEqual(original_words, ['sayang', 'tuti'])
-        self.assertEqual(corrected_words, ['sayang', 'tuti', 'sayang'])
+        self.assertEqual(extract_words(LOWERCASE_CORRECTION_XML), ['sayang', 'tuti'])
 
     def test_nested_annotation_span_is_contained_in_outer_span(self):
         from .corpus_parsing import extract_error_annotations
@@ -1488,12 +1468,12 @@ class CorpusParsingTests(TestCase):
     def test_existing_top_level_segment_fixture_is_unaffected(self):
         # Regression pin: the original (non-nested) CORPUS_XML fixture used
         # throughout this file must tokenize identically to before the fix.
-        from .corpus_parsing import extract_word_streams
+        from .corpus_parsing import extract_words
 
-        original_words, corrected_words = extract_word_streams(CORPUS_XML)
-        self.assertEqual(len(original_words), 10)
-        self.assertIn('tetapi', corrected_words)
-        self.assertNotIn('tapi', corrected_words)
+        words = extract_words(CORPUS_XML)
+        self.assertEqual(len(words), 10)
+        self.assertIn('tapi', words)
+        self.assertNotIn('tetapi', words)
 
 
 class ErrorAnnotationWorkerTaskTests(TestCase):
@@ -1520,9 +1500,9 @@ class ErrorAnnotationWorkerTaskTests(TestCase):
         self.assertEqual(outer.taxonomy_node.path, 'eror;gramatikal;frasa-nomina;urtfn')
 
         # Position-consistency by construction: the outer span's Token rows
-        # (mode=original) are exactly the annotation's text.
+        # are exactly the annotation's text.
         tokens = list(
-            doc.tokens.filter(mode='original', position__gte=outer.start_position, position__lt=outer.end_position)
+            doc.tokens.filter(position__gte=outer.start_position, position__lt=outer.end_position)
             .order_by('position').values_list('word_type__form', flat=True)
         )
         self.assertEqual(tokens, ['goreng', 'nasi'])
@@ -1699,7 +1679,7 @@ class RetokenizeDryRunTests(TestCase):
 
     def test_dry_run_writes_nothing(self):
         doc = Document.objects.create(
-            title='n.xml', content=NESTED_CORPUS_XML, token_count=0, token_count_corrected=0,
+            title='n.xml', content=NESTED_CORPUS_XML, token_count=0,
         )
         # Deliberately NOT indexed — token_count stays at the stale value
         # above, simulating a document indexed before the tokenizer fix.

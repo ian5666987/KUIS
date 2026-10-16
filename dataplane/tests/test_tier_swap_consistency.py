@@ -16,17 +16,17 @@ actual property a repository consumer depends on when the swap happens
 under them.
 """
 
-from dataplane.repositories.base import MatchMode, Mode, SortDirection
+from dataplane.repositories.base import MatchMode, SortDirection
 from dataplane.repositories.postgres._aggregate_query import compute_ngram_agg_page, compute_word_freq_page
 from dataplane.repositories.postgres._ranked_query import compute_ranked_page
 
 
 async def test_word_frequency_tier0_and_tier2_agree(session, document_ids):
     tier0 = await compute_ranked_page(
-        session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
     tier2 = await compute_word_freq_page(
-        session, document_ids, Mode.ORIGINAL, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
 
     assert tier0.rows == tier2.rows
@@ -35,12 +35,12 @@ async def test_word_frequency_tier0_and_tier2_agree(session, document_ids):
     assert tier0.token_total == tier2.token_total
 
 
-async def test_word_frequency_tier0_and_tier2_agree_with_filter_and_corrected_mode(session, document_ids):
+async def test_word_frequency_tier0_and_tier2_agree_with_filter(session, document_ids):
     tier0 = await compute_ranked_page(
-        session, document_ids, Mode.CORRECTED, 1, "s", MatchMode.STARTS, "item", SortDirection.ASC, 250, 0
+        session, document_ids, 1, "s", MatchMode.STARTS, "item", SortDirection.ASC, 250, 0
     )
     tier2 = await compute_word_freq_page(
-        session, document_ids, Mode.CORRECTED, "s", MatchMode.STARTS, "item", SortDirection.ASC, 250, 0
+        session, document_ids, "s", MatchMode.STARTS, "item", SortDirection.ASC, 250, 0
     )
 
     assert tier0.rows == tier2.rows
@@ -49,10 +49,10 @@ async def test_word_frequency_tier0_and_tier2_agree_with_filter_and_corrected_mo
 
 async def test_collocations_tier0_and_tier2_agree(session, document_ids):
     tier0 = await compute_ranked_page(
-        session, document_ids, Mode.ORIGINAL, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
     tier2 = await compute_ngram_agg_page(
-        session, document_ids, Mode.ORIGINAL, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
 
     assert tier0.rows == tier2.rows
@@ -63,10 +63,10 @@ async def test_collocations_tier0_and_tier2_agree(session, document_ids):
 
 async def test_trigrams_tier0_and_tier2_agree(session, document_ids):
     tier0 = await compute_ranked_page(
-        session, document_ids, Mode.ORIGINAL, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
     tier2 = await compute_ngram_agg_page(
-        session, document_ids, Mode.ORIGINAL, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+        session, document_ids, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
     )
 
     assert tier0.rows == tier2.rows

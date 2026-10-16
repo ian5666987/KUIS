@@ -40,7 +40,6 @@ async def search_kwic(
     # FastAPI always constructs it, and a default would imply it can be None.
     metadata: Annotated[MetadataFilterParams, Depends()],
     q: Annotated[str, Query(min_length=1)],
-    corrected: bool = False,
     window: int = 5,
     page: int = 1,
     per_page: int = 50,
@@ -49,7 +48,6 @@ async def search_kwic(
     result = await service.search(
         corpus_ids=corpus_ids,
         query=q,
-        corrected=corrected,
         window=window,
         page=page,
         per_page=per_page,
@@ -63,6 +61,5 @@ async def search_kwic(
         page=result.page,
         per_page=result.per_page,
         window=result.window,
-        corrected=corrected,
         sort=result.sort.value,
     )

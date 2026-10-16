@@ -21,13 +21,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class Mode(str, Enum):
-    """Mirrors main/models.py::Token.ORIGINAL / Token.CORRECTED."""
-
-    ORIGINAL = "original"
-    CORRECTED = "corrected"
-
-
 class MatchMode(str, Enum):
     """Mirrors main/views.py::MATCH_MODES."""
 
@@ -83,7 +76,6 @@ class KWICRepository(ABC):
         self,
         document_ids: list[int],
         words: list[str],
-        mode: Mode,
         window: int,
         limit: int,
         offset: int,
@@ -91,7 +83,7 @@ class KWICRepository(ABC):
     ) -> list[KWICHit]: ...
 
     @abstractmethod
-    async def count_matches(self, document_ids: list[int], words: list[str], mode: Mode) -> int: ...
+    async def count_matches(self, document_ids: list[int], words: list[str]) -> int: ...
 
 
 # --- Frequency / Collocation / Ngram ------------------------------------
@@ -120,7 +112,6 @@ class FrequencyRepository(ABC):
     async def ranked(
         self,
         document_ids: list[int],
-        mode: Mode,
         query: str | None,
         match_mode: MatchMode,
         sort: str,
@@ -142,7 +133,6 @@ class CollocationRepository(ABC):
     async def ranked(
         self,
         document_ids: list[int],
-        mode: Mode,
         query: str | None,
         match_mode: MatchMode,
         sort: str,
@@ -157,7 +147,6 @@ class NgramRepository(ABC):
     async def ranked(
         self,
         document_ids: list[int],
-        mode: Mode,
         n: int,
         query: str | None,
         match_mode: MatchMode,

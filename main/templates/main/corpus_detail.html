@@ -42,12 +42,8 @@
       <div class="stats__value">{{ document_count }}</div>
     </div>
     <div class="stats__item">
-      <div class="stats__label">Tokens · original</div>
+      <div class="stats__label">Tokens</div>
       <div class="stats__value">{{ token_total|intcomma }}</div>
-    </div>
-    <div class="stats__item">
-      <div class="stats__label">Tokens · corrected</div>
-      <div class="stats__value">{{ token_total_corrected|intcomma }}</div>
     </div>
   </div>
 
@@ -58,8 +54,7 @@
         <thead>
           <tr>
             {% include 'main/components/sort_header.html' with field='title' label='File' default_dir='asc' numeric=False %}
-            {% include 'main/components/sort_header.html' with field='tokens' label='Tokens · original' default_dir='desc' numeric=True %}
-            <th scope="col" class="num">Tokens · corrected</th>
+            {% include 'main/components/sort_header.html' with field='tokens' label='Tokens' default_dir='desc' numeric=True %}
             {% include 'main/components/sort_header.html' with field='uploaded' label='Uploaded' default_dir='desc' numeric=False %}
             <th scope="col">Also in</th>
           </tr>
@@ -69,7 +64,6 @@
             <tr>
               <th scope="row" style="font-weight:500;">{{ doc.title }}</th>
               <td class="num">{{ doc.token_count|intcomma }}</td>
-              <td class="num">{{ doc.token_count_corrected|intcomma }}</td>
               <td class="text-sm text-muted">{{ doc.uploaded_at|date:"j M Y" }}</td>
               <td class="text-sm text-muted">
                 {% for other in doc.corpora.all %}{% if other.id != corpus.id %}<a href="{% url 'corpus_detail' other.id %}">{{ other.name }}</a>{% if not forloop.last %}, {% endif %}{% endif %}{% empty %}—{% endfor %}

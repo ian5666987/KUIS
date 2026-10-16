@@ -1,5 +1,5 @@
 """Mirrors main/views.py::word_frequency's request-shaping — corpus
-resolution, mode, and pagination — around FrequencyRepository. Stays
+resolution and pagination — around FrequencyRepository. Stays
 unchanged when the repository's storage backend does (architecture plan
 §1)."""
 
@@ -11,7 +11,6 @@ from dataplane.repositories.base import (
     FrequencyRepository,
     MatchMode,
     MetadataFilter,
-    Mode,
     RankedRow,
     SortDirection,
 )
@@ -37,7 +36,6 @@ class FrequencyService:
     async def search(
         self,
         corpus_ids: list[int],
-        corrected: bool,
         query: str | None,
         match_mode: MatchMode,
         sort: str,
@@ -48,7 +46,6 @@ class FrequencyService:
     ) -> RankedSearchResult:
         per_page = normalize_per_page(per_page)
         page = max(page, 1)
-        mode = Mode.CORRECTED if corrected else Mode.ORIGINAL
 
         # The secondary metadata filter is threaded in here rather than into the
         # repository call: it narrows which documents are in scope, which is a
@@ -57,7 +54,7 @@ class FrequencyService:
         document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
         offset = (page - 1) * per_page
 
-        result = await self._repository.ranked(document_ids, mode, query, match_mode, sort, direction, per_page, offset)
+        result = await self._repository.ranked(document_ids, query, match_mode, sort, direction, per_page, offset)
 
         return RankedSearchResult(
             rows=result.rows,

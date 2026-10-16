@@ -44,15 +44,15 @@ def test_filter_by_match_mode(client, auth_headers, seeded_corpus):
     assert body["type_count"] == 9
 
 
-def test_corrected_mode(client, auth_headers, seeded_corpus):
+def test_counts_the_text_as_written_not_the_correction(client, auth_headers, seeded_corpus):
     response = client.get(
         "/api/v1/frequency",
-        params={"corpus_ids": [seeded_corpus["corpus_id"]], "corrected": True},
+        params={"corpus_ids": [seeded_corpus["corpus_id"]]},
         headers=auth_headers,
     )
     by_item = {row["item"]: row["count"] for row in response.json()["results"]}
-    assert "tapi" not in by_item
-    assert by_item["tetapi"] == 1
+    assert by_item["tapi"] == 1
+    assert "tetapi" not in by_item
 
 
 def test_missing_corpus_ids_is_a_validation_error(client, auth_headers):

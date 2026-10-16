@@ -50,9 +50,10 @@ SSH deploy on `workflow_dispatch`.
 | **7.6** | 2026-10-02 | Error Summary hierarchical breakdown — `by_node` roll-up alongside the original `by_category`, plus the expandable tree |
 | **7.7** | 2026-10-02 | Document metadata catalogue + secondary filters (migration `0014`). University/year/grade/name-code facets composing with corpus selection on every analysis feature, both surfaces |
 | **7.8** | 2026-10-13 | Author (person-level) metadata + `gender`/`mother_tongue` facets (migration `0015`). Backend and the Django surface; KUIS-FE controls pending |
+| **7.9** | 2026-10-16 | Corrected text mode removed to save space (migration `0017`). Only the text as written is tokenized; the `mode` column is gone from `Token`/`DocumentWordFreq`/`DocumentNgram` along with `Document.token_count_corrected`, roughly halving all three tables. The `corrected` param is dropped from every analysis endpoint and the toggle from both UIs. A segment's correction is still stored and shown via `ErrorAnnotation.correction_text` |
 | **8** | — | ⬜ **Not started.** Caching (Tier 4) + retiring the superseded Django live-parse views |
 
-Test-suite growth, for scale: 29 Django tests at Phase 0 → 229 today, plus 171
+Test-suite growth, for scale: 29 Django tests at Phase 0 → 229 today, plus 170
 data plane tests.
 
 ## Notable course corrections

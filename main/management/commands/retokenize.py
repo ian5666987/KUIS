@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from main.corpus_parsing import extract_word_streams
+from main.corpus_parsing import extract_words
 from main.models import Document
 from worker.tasks.indexing import index_document
 
@@ -85,7 +85,7 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(
                     f"[{i}/{total}] {document.title}: "
-                    f"{document.token_count} original tokens, {document.token_count_corrected} corrected tokens"
+                    f"{document.token_count} tokens"
                 )
 
         self.stdout.write(self.style.SUCCESS(f"Retokenized {total} document(s)."))
@@ -93,15 +93,12 @@ class Command(BaseCommand):
     def _dry_run(self):
         changed = 0
         for document in Document.objects.all():
-            new_original, new_corrected = extract_word_streams(document.content)
-            delta_original = len(new_original) - document.token_count
-            delta_corrected = len(new_corrected) - document.token_count_corrected
-            if delta_original or delta_corrected:
+            new_count = len(extract_words(document.content))
+            delta = new_count - document.token_count
+            if delta:
                 changed += 1
             self.stdout.write(
-                f"{document.title}: original {document.token_count} -> {len(new_original)} "
-                f"({delta_original:+d}), corrected {document.token_count_corrected} -> "
-                f"{len(new_corrected)} ({delta_corrected:+d})"
+                f"{document.title}: {document.token_count} -> {new_count} ({delta:+d})"
             )
         self.stdout.write(self.style.WARNING(
             f"Dry run only — no Token rows changed. {changed} document(s) would change."

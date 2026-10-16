@@ -13,7 +13,7 @@ this code and trusting the output. seeded_corpus / session / document_ids
 fixtures live in conftest.py.
 """
 
-from dataplane.repositories.base import MatchMode, Mode, RankedPage, SortDirection
+from dataplane.repositories.base import MatchMode, RankedPage, SortDirection
 from dataplane.repositories.postgres._ranked_query import compute_ranked_page
 
 
@@ -22,7 +22,7 @@ class TestWordFrequency:
 
     async def test_counts_every_word_across_both_documents(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
 
         by_item = {row.item: row.count for row in page.rows}
@@ -47,7 +47,7 @@ class TestWordFrequency:
         # naive "ORDER BY count DESC, item DESC" would reverse the tied
         # group's alphabetical order and silently diverge from Django.
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
         items = [row.item for row in page.rows]
         # count=4 group, tied, must stay alphabetically ascending:
@@ -55,7 +55,7 @@ class TestWordFrequency:
 
     async def test_sort_count_asc_still_ties_alphabetically_ascending(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "count", SortDirection.ASC, 50, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "count", SortDirection.ASC, 50, 0
         )
         items = [row.item for row in page.rows]
         # count=1 group comes first ascending, still alphabetical:
@@ -63,36 +63,36 @@ class TestWordFrequency:
 
     async def test_filter_starts_with(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, "nasi", MatchMode.STARTS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 1, "nasi", MatchMode.STARTS, "count", SortDirection.DESC, 50, 0
         )
         assert [row.item for row in page.rows] == ["nasi"]
         assert page.result_count == 1
         # type_count is UNFILTERED — still every distinct word:
         assert page.type_count == 9
 
-    async def test_corrected_mode_substitutes_the_correction(self, session, document_ids):
+    async def test_counts_the_text_as_written_not_the_correction(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.CORRECTED, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
         by_item = {row.item: row.count for row in page.rows}
-        assert "tapi" not in by_item
-        assert by_item["tetapi"] == 1
+        assert by_item["tapi"] == 1
+        assert "tetapi" not in by_item
 
     async def test_pagination(self, session, document_ids):
         page1 = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 2, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 2, 0
         )
         page2 = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 2, 2
+            session, document_ids, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 2, 2
         )
         full = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 50, 0
+            session, document_ids, 1, None, MatchMode.CONTAINS, "item", SortDirection.ASC, 50, 0
         )
         assert page1.rows + page2.rows == full.rows[:4]
 
     async def test_empty_document_ids_returns_empty_page_not_an_error(self, session):
         page = await compute_ranked_page(
-            session, [], Mode.ORIGINAL, 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, [], 1, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
         assert page == RankedPage(rows=[], result_count=0, type_count=0, token_total=0)
 
@@ -102,7 +102,7 @@ class TestCollocations:
 
     async def test_counts_adjacent_pairs(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
         by_item = {row.item: row.count for row in page.rows}
 
@@ -118,7 +118,7 @@ class TestCollocations:
         # documents were flattened together, "lagi saya" would appear as a
         # spurious pair. It must not.
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+            session, document_ids, 2, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
         )
         items = {row.item for row in page.rows}
         assert "lagi saya" not in items
@@ -129,7 +129,7 @@ class TestNgrams:
 
     async def test_trigram_counts(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
+            session, document_ids, 3, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 50, 0
         )
         by_item = {row.item: row.count for row in page.rows}
 
@@ -140,7 +140,7 @@ class TestNgrams:
 
     async def test_larger_n_still_correct(self, session, document_ids):
         page = await compute_ranked_page(
-            session, document_ids, Mode.ORIGINAL, 5, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
+            session, document_ids, 5, None, MatchMode.CONTAINS, "count", SortDirection.DESC, 250, 0
         )
         # Every 5-gram window's item string must be exactly 5 words — a
         # self-join fan-out bug would silently inflate this.

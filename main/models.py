@@ -3,7 +3,7 @@
 from django.db import models, transaction
 from django.contrib.auth.models import User
 
-from .corpus_parsing import extract_word_streams
+from .corpus_parsing import extract_words
 
 # Create your models here.
 class Document(models.Model):
@@ -23,7 +23,6 @@ class Document(models.Model):
 
     # Preprocessed
     token_count = models.IntegerField(default=0)
-    token_count_corrected = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Architecture plan §5/§8 Phase 5 — the worker sets these explicitly
@@ -115,13 +114,11 @@ class WordType(models.Model):
 
 
 class Token(models.Model):
-    ORIGINAL = 'original'
-    CORRECTED = 'corrected'
-    MODE_CHOICES = [
-        (ORIGINAL, 'Original'),
-        (CORRECTED, 'Corrected'),
-    ]
-
+    # Only the text as the learner wrote it is tokenized. A second "corrected"
+    # stream (every segment's Correction substituted in) used to be stored
+    # alongside it under a `mode` column, doubling this table and both Tier-2
+    # aggregates; it was dropped to save space. The proposed corrections stay
+    # available per error on ErrorAnnotation.correction_text.
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='tokens')
     # Replaces the old `word` varchar column (architecture plan §2, Tier 1
     # — "Token.word_type FK replacing Token.word"). Every reader of the old
@@ -131,15 +128,14 @@ class Token(models.Model):
     # repository that touched Token.word directly.
     word_type = models.ForeignKey(WordType, on_delete=models.CASCADE, related_name='tokens')
     position = models.IntegerField()
-    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=ORIGINAL)
 
     class Meta:
         indexes = [
-            models.Index(fields=['document', 'mode', 'position']),
+            models.Index(fields=['document', 'position']),
         ]
 
     def __str__(self):
-        return f"{self.word_type.form} ({self.document_id}:{self.mode}:{self.position})"
+        return f"{self.word_type.form} ({self.document_id}:{self.position})"
 
 
 class DocumentWordFreq(models.Model):
@@ -151,21 +147,17 @@ class DocumentWordFreq(models.Model):
 
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='word_freqs')
     word_type = models.ForeignKey(WordType, on_delete=models.CASCADE)
-    mode = models.CharField(max_length=10, choices=Token.MODE_CHOICES)
     count = models.IntegerField()
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['document', 'word_type', 'mode'], name='uniq_doc_wordfreq'),
-        ]
-        indexes = [
-            models.Index(fields=['document', 'mode']),
+            models.UniqueConstraint(fields=['document', 'word_type'], name='uniq_doc_wordfreq'),
         ]
 
 
 class DocumentNgram(models.Model):
-    """Precomputed per-document n-gram counts — TOP-K per (document, n,
-    mode) with a frequency floor, not every n-gram (architecture plan §2,
+    """Precomputed per-document n-gram counts — TOP-K per (document, n)
+    with a frequency floor, not every n-gram (architecture plan §2,
     Tier 2: "Storing all 5-grams is storing the corpus again at 5x
     multiplicity, and the tail is never read"). The worker task
     (worker/tasks/aggregates.py) decides K and the floor, not this schema —
@@ -186,12 +178,11 @@ class DocumentNgram(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='ngram_freqs')
     n = models.SmallIntegerField()
     word_type_ids = models.JSONField()  # ordered list[int], e.g. [12, 45, 7]
-    mode = models.CharField(max_length=10, choices=Token.MODE_CHOICES)
     count = models.IntegerField()
 
     class Meta:
         indexes = [
-            models.Index(fields=['document', 'n', 'mode']),
+            models.Index(fields=['document', 'n']),
         ]
 
 
@@ -356,7 +347,7 @@ class DocumentMetadata(models.Model):
     topic = models.CharField(max_length=100, null=True, blank=True)
     topic_en = models.CharField(max_length=100, null=True, blank=True)
     # The catalogue's own word count — a third, independent notion of length
-    # alongside Document.token_count/token_count_corrected, which are
+    # alongside Document.token_count, which is
     # computed by main/corpus_parsing.py's own tokenizer and legitimately
     # disagree with this. Stored, not reconciled, and not filterable.
     word_count = models.IntegerField(null=True, blank=True)
@@ -514,8 +505,8 @@ class AuthorMotherTongue(models.Model):
 
 
 def build_tokens(document):
-    """(Re)computes the Token rows for a document from its content, for both the
-    original and corrected word streams. Does not save the document itself.
+    """(Re)computes the Token rows for a document from its original word
+    stream. Does not save the document itself. Returns the token count.
 
     Resolves each distinct word to a WordType row (bulk get-or-create, one
     query for the missing forms rather than one per word) before building
@@ -524,8 +515,8 @@ def build_tokens(document):
     bulk_create, no transaction), fixed together since both needed touching
     this same function anyway.
     """
-    original_words, corrected_words = extract_word_streams(document.content)
-    all_words = set(original_words) | set(corrected_words)
+    original_words = extract_words(document.content)
+    all_words = set(original_words)
 
     with transaction.atomic():
         existing = {
@@ -546,16 +537,13 @@ def build_tokens(document):
             )
 
         tokens = [
-            Token(document=document, word_type_id=existing[word], position=i, mode=Token.ORIGINAL)
+            Token(document=document, word_type_id=existing[word], position=i)
             for i, word in enumerate(original_words)
-        ] + [
-            Token(document=document, word_type_id=existing[word], position=i, mode=Token.CORRECTED)
-            for i, word in enumerate(corrected_words)
         ]
 
         Token.objects.bulk_create(tokens, batch_size=5000)
 
-    return len(original_words), len(corrected_words)
+    return len(original_words)
 
 
 # NOTE: the post_save signal that used to call build_tokens() synchronously

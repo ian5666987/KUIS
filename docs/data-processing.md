@@ -23,9 +23,10 @@ XML per file:
 
 Three things have to come out of that, and they pull in different directions:
 
-1. **Two parallel word streams** — the text as written (`original`) and the text
-   with every `Correction` applied (`corrected`). Every analysis feature can be
-   run against either.
+1. **One word stream** — the text as written. A segment's `Correction` is *not*
+   tokenized; it is kept only on that segment's `ErrorAnnotation` row (§2). A
+   second, corrected stream used to be stored alongside it and was dropped to
+   save space (migration `0017_drop_corrected_mode`).
 2. **Positional data** — KWIC and EPIC need to know *where* a word is, with a
    context window, without straddling a document boundary.
 3. **Aggregates** — frequency, collocations and n-grams only ever need counts,
@@ -43,17 +44,14 @@ their writers.
   metadata match key** (§6). It deliberately does *not* gate on
   `looks_like_structured_xml`, whose `<body>` requirement is a tokenization
   concern, not a header one.
-- `parse_document()` falls back to flat (non-XML-aware) tokenization when the
-  content isn't parseable XML or has no `<body>`, and returns an `is_structured`
-  flag for exactly that case. The UI names the affected files in corrected mode
-  (`components/mode_notice.html`), where the fallback would otherwise look like
-  an identical result for no reason. **Unparseable content is never an upload
-  failure.**
+- `extract_words()` falls back to flat (non-XML-aware) tokenization when the
+  content isn't parseable XML or has no `<body>`. Content that is evidently
+  *meant* to be corpus XML but doesn't parse is caught earlier, by
+  `diagnose_content()`, and marks the document failed instead (§3).
 - **Nested `<segment>` elements are handled.** They were silently dropped by the
   original tokenizer; fixed as part of the error-analytics work.
-- **`Correction` vs `correction` attribute casing.** Sample files use both; the
-  walker only reads capital-C `Correction`, so lowercase-attribute segments
-  contribute nothing to the corrected word stream.
+- **`Correction` vs `correction` attribute casing.** Sample files use both,
+  consistently within a file; `ErrorAnnotation.correction_text` reads either.
 
 ---
 
@@ -67,7 +65,7 @@ Django's ORM.
 
 - **`Document`** — `title`, `content` (the raw XML/text, exactly as uploaded),
   `uploaded_at`, `created_at`, `user` (FK→`User`, nullable, **`CASCADE`** — the
-  reason account deletion is soft), `token_count`, `token_count_corrected`,
+  reason account deletion is soft), `token_count`,
   `status` (`ready`|`indexing`|`failed`, **defaults to `indexing`** — a row exists
   before its tokens do; only `worker/tasks/indexing.py` ever moves it),
   `status_reason`/`status_detail` (why a `failed` document failed — a stable
@@ -85,8 +83,8 @@ Django's ORM.
 
 - **`WordType`** — `form` (unique). One row per distinct word form, project-wide.
 - **`Token`** — `document` (FK, `related_name='tokens'`), **`word_type`**
-  (FK→`WordType`), `position`, `mode` (`original`|`corrected`). One row per token
-  per mode per document.
+  (FK→`WordType`), `position`. One row per token per document; index on
+  `(document, position)`.
 
 `Token.word_type` **replaced** an earlier `Token.word varchar(100)` column, and
 that change is the single highest-leverage storage decision in the project.
@@ -102,8 +100,8 @@ require retokenizing anything.
 
 ### Tier 2 — the precomputed aggregates
 
-- **`DocumentWordFreq`** — `(document, word_type, mode, count)`.
-- **`DocumentNgram`** — `(document, n, word_type_ids, mode, count)`.
+- **`DocumentWordFreq`** — `(document, word_type, count)`.
+- **`DocumentNgram`** — `(document, n, word_type_ids, count)`.
   `word_type_ids` is a plain **`JSONField`** holding an ordered `list[int]`, not an
   `ArrayField` — `ArrayField` is Postgres-only and the Django test suite
   deliberately runs on SQLite.
@@ -189,8 +187,8 @@ POST (any of six upload sites)
        │                                       filterable the moment it exists)
        └─ if CREATED: index_document.delay(doc.id)
             └─ worker/tasks/indexing.py
-                 ├─ build_tokens()  → WordType rows + Token rows (both modes)
-                 ├─ write token_count, token_count_corrected
+                 ├─ build_tokens()  → WordType rows + Token rows
+                 ├─ write token_count
                  ├─ write content_hash / tokenized_hash / tokenizer_version
                  ├─ chain → compute_document_word_freq   (DocumentWordFreq)
                  ├─ chain → compute_document_ngrams      (DocumentNgram)
@@ -426,7 +424,7 @@ not `metadata`, which would read as a sibling of Django's `_meta` and SQLAlchemy
 `metadata`. **Every analysis field is nullable** because the "(no value)" filter
 needs one representation of empty — a blank cell imports as `None`, never `''`.
 `Number of words` is stored but **not filterable**: it is a third, independent
-notion of length alongside `token_count`/`token_count_corrected`, which come from
+notion of length alongside `token_count`, which comes from
 our own tokenizer and legitimately disagree.
 
 ### The matching rule
@@ -920,14 +918,15 @@ The original plan ran in five tiers. Four are done:
 | **3** — indexing out of the request | `transaction.atomic`, `bulk_create(batch_size=5000)`, a task queue, a `status` field, no `post_save` signal | ✅ shipped (§3) |
 | **4** — caching | Redis-backed cache at the service layer | ⬜ **not started** |
 
-Stretch items from Tier 1 that were **not** done: `mode` as `smallint`/`bool`
-instead of a `varchar(10)`; storing a corrected token only when it differs from
-the original (for a mostly-plain-text corpus this would halve the table — today
-`_flat_tokenize_both()` returns `words, list(words)`, so **every token of a plain
-text document is stored twice**); a `BRIN` index on `document_id` instead of btree
-(rows are inserted in document order, so BRIN would be nearly free); a composite
-PK `(document_id, mode, position)` replacing the `bigint` surrogate, which would
-remove an entire index and give clustering for free.
+The corrected word stream (and with it the `mode` column on `Token`,
+`DocumentWordFreq` and `DocumentNgram`) was removed outright in
+`0017_drop_corrected_mode`, which roughly halved all three tables — that
+supersedes the old stretch items about shrinking `mode` or deduplicating
+corrected tokens. Stretch items from Tier 1 still **not** done: a `BRIN` index
+on `document_id` instead of btree (rows are inserted in document order, so BRIN
+would be nearly free); a composite PK `(document_id, position)` replacing the
+`bigint` surrogate, which would remove an entire index and give clustering for
+free.
 
 ### Caching (Tier 4) — the cheapest large win left
 
@@ -936,7 +935,7 @@ second pageview of a result set from ~6 seconds into milliseconds, and it is
 orthogonal to every other tier. Redis already exists as the Celery broker.
 
 **The key is wider than the original plan assumed.** It is not
-`(corpus ids, mode, feature, n)`: the metadata filter is a second scoping axis
+`(corpus ids, feature, n)`: the metadata filter is a second scoping axis
 and the error-analytics code filter a third, so **any cache key has to include
 all five metadata facets plus the `__none__` sentinel per facet, and the error
 code set** — or a filtered request will serve an unfiltered result. The authority

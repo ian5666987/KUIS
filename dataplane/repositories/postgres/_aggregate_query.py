@@ -26,14 +26,13 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.models.tables import document, document_ngram, document_word_freq, word_type
-from dataplane.repositories.base import MatchMode, Mode, RankedPage, SortDirection
+from dataplane.repositories.base import MatchMode, RankedPage, SortDirection
 from dataplane.repositories.postgres._ranked_pagination import paginate_python_rows, paginate_sql_source
 
 
 async def compute_word_freq_page(
     session: AsyncSession,
     document_ids: list[int],
-    mode: Mode,
     query: str | None,
     match_mode: MatchMode,
     sort: str,
@@ -44,20 +43,21 @@ async def compute_word_freq_page(
     if not document_ids:
         return RankedPage(rows=[], result_count=0, type_count=0, token_total=0)
 
-    # Document.token_count/token_count_corrected are already the exact
+    # Document.token_count is already the exact
     # "total word occurrences" figure (set by worker/tasks/indexing.py) —
     # cheaper than re-deriving it from Token, and it's the SAME number
     # regardless of which tier answers the query (see _ranked_query.py's
     # docstring on why token_total is n-independent).
-    count_column = document.c.token_count if mode == Mode.ORIGINAL else document.c.token_count_corrected
     token_total = (
-        await session.execute(select(func.coalesce(func.sum(count_column), 0)).where(document.c.id.in_(document_ids)))
+        await session.execute(
+            select(func.coalesce(func.sum(document.c.token_count), 0)).where(document.c.id.in_(document_ids))
+        )
     ).scalar_one()
 
     source = (
         select(word_type.c.form.label("item"), func.sum(document_word_freq.c.count).label("count"))
         .select_from(document_word_freq.join(word_type, word_type.c.id == document_word_freq.c.word_type_id))
-        .where(and_(document_word_freq.c.document_id.in_(document_ids), document_word_freq.c.mode == mode.value))
+        .where(document_word_freq.c.document_id.in_(document_ids))
         .group_by(word_type.c.form)
         .subquery()
     )
@@ -72,7 +72,6 @@ async def compute_word_freq_page(
 async def compute_ngram_agg_page(
     session: AsyncSession,
     document_ids: list[int],
-    mode: Mode,
     n: int,
     query: str | None,
     match_mode: MatchMode,
@@ -84,9 +83,10 @@ async def compute_ngram_agg_page(
     if not document_ids:
         return RankedPage(rows=[], result_count=0, type_count=0, token_total=0)
 
-    count_column = document.c.token_count if mode == Mode.ORIGINAL else document.c.token_count_corrected
     token_total = (
-        await session.execute(select(func.coalesce(func.sum(count_column), 0)).where(document.c.id.in_(document_ids)))
+        await session.execute(
+            select(func.coalesce(func.sum(document.c.token_count), 0)).where(document.c.id.in_(document_ids))
+        )
     ).scalar_one()
 
     # Cross-document SUM stays in SQL — only the id->form resolution and
@@ -98,7 +98,6 @@ async def compute_ngram_agg_page(
         .where(
             and_(
                 document_ngram.c.document_id.in_(document_ids),
-                document_ngram.c.mode == mode.value,
                 document_ngram.c.n == n,
             )
         )

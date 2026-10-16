@@ -23,5 +23,4 @@ class KWICSearchResponse(BaseModel):
     page: int
     per_page: int
     window: int
-    corrected: bool
     sort: str

@@ -6,7 +6,7 @@ the router, and Next.js needed zero changes for this swap."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataplane.repositories.base import FrequencyRepository, MatchMode, Mode, RankedPage, SortDirection
+from dataplane.repositories.base import FrequencyRepository, MatchMode, RankedPage, SortDirection
 from dataplane.repositories.postgres._aggregate_query import compute_word_freq_page
 
 
@@ -17,7 +17,6 @@ class PostgresFrequencyRepository(FrequencyRepository):
     async def ranked(
         self,
         document_ids: list[int],
-        mode: Mode,
         query: str | None,
         match_mode: MatchMode,
         sort: str,
@@ -26,5 +25,5 @@ class PostgresFrequencyRepository(FrequencyRepository):
         offset: int,
     ) -> RankedPage:
         return await compute_word_freq_page(
-            self._session, document_ids, mode, query, match_mode, sort, direction, limit, offset
+            self._session, document_ids, query, match_mode, sort, direction, limit, offset
         )

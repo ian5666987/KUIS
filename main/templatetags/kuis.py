@@ -17,7 +17,7 @@ def hidden_params(context, exclude=''):
     """Re-emit the current query string as hidden inputs, minus `exclude`.
 
     Lets a form change one parameter without discarding the others (e.g. the
-    text-mode toggle keeps the KWIC query and window intact).
+    corpus picker keeps the KWIC query and window intact).
     """
     request = context['request']
     skip = {name.strip() for name in exclude.split(',') if name.strip()}

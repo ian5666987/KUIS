@@ -10,7 +10,6 @@
   <div class="stats__item">
     <div class="stats__label">Tokens analysed</div>
     <div class="stats__value">{{ token_total|intcomma }}</div>
-    <div class="stats__note">{{ corrected|yesno:"corrected,original" }} text</div>
   </div>
   <div class="stats__item">
     <div class="stats__label">Distinct {{ unit }}</div>
@@ -74,7 +73,7 @@
   <div class="table-wrap" style="margin-top:14px;">
     <table class="data">
       <caption class="visually-hidden">
-        {{ item_label }} frequencies across the selected corpora, {{ corrected|yesno:"corrected,original" }} text
+        {{ item_label }} frequencies across the selected corpora
       </caption>
       <thead>
         <tr>
@@ -106,5 +105,5 @@
 {% elif is_filtered %}
   {% include 'main/components/state.html' with title='No matches for this filter' body='No item in the selected corpora matches that filter. Try a shorter string, or a different match type.' %}
 {% else %}
-  {% include 'main/components/state.html' with title='Nothing to count' body='The selected corpora contain no text in this mode. Check that the corpora have files attached.' action_url='/corpus/' action_label='Review corpora' %}
+  {% include 'main/components/state.html' with title='Nothing to count' body='The selected corpora contain no text. Check that the corpora have files attached.' action_url='/corpus/' action_label='Review corpora' %}
 {% endif %}

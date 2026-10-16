@@ -40,7 +40,6 @@ def _annotated_corpus_queryset():
     return Corpus.objects.annotate(
         document_count=Count("documents", distinct=True),
         token_total=Sum("documents__token_count"),
-        token_total_corrected=Sum("documents__token_count_corrected"),
     )
 
 
@@ -51,13 +50,9 @@ class CorpusSerializer(serializers.ModelSerializer):
     # serialize as `null`, forcing every consumer to null-check a count.
     # Matches main/views.py's own `totals['tokens'] or 0` pattern.
     token_total = serializers.SerializerMethodField()
-    token_total_corrected = serializers.SerializerMethodField()
 
     def get_token_total(self, obj) -> int:
         return obj.token_total or 0
-
-    def get_token_total_corrected(self, obj) -> int:
-        return obj.token_total_corrected or 0
 
     class Meta:
         model = Corpus
@@ -68,7 +63,6 @@ class CorpusSerializer(serializers.ModelSerializer):
             "is_public",
             "document_count",
             "token_total",
-            "token_total_corrected",
             "created_at",
         ]
 
@@ -91,7 +85,6 @@ class CorpusDetailSerializer(CorpusSerializer):
                 "title": doc.title,
                 "uploaded_at": doc.uploaded_at,
                 "token_count": doc.token_count,
-                "token_count_corrected": doc.token_count_corrected,
                 "status": doc.status,
                 # Empty unless status is 'failed' — the corpus detail table is
                 # where a failed file is actually looked at, so the reason

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, MetadataFilter, Mode
+from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, MetadataFilter
 from dataplane.repositories.shared import resolve_document_ids
 from dataplane.services.pagination import normalize_per_page
 
@@ -46,7 +46,6 @@ class KWICService:
         self,
         corpus_ids: list[int],
         query: str,
-        corrected: bool,
         window: int,
         page: int,
         per_page: int,
@@ -58,7 +57,6 @@ class KWICService:
         page = max(page, 1)
 
         words = query.strip().lower().split()
-        mode = Mode.CORRECTED if corrected else Mode.ORIGINAL
 
         # The secondary metadata filter is threaded in here rather than into the
         # repository call: it narrows which documents are in scope, which is a
@@ -70,7 +68,7 @@ class KWICService:
             return KWICSearchResult(hits=[], total=0, window=window, page=page, per_page=per_page, sort=sort)
 
         offset = (page - 1) * per_page
-        hits = await self._repository.search(document_ids, words, mode, window, per_page, offset, sort)
-        total = await self._repository.count_matches(document_ids, words, mode)
+        hits = await self._repository.search(document_ids, words, window, per_page, offset, sort)
+        total = await self._repository.count_matches(document_ids, words)
 
         return KWICSearchResult(hits=hits, total=total, window=window, page=page, per_page=per_page, sort=sort)

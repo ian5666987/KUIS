@@ -153,7 +153,6 @@ async def compute_error_occurrences(
     range_clauses = [
         and_(
             token.c.document_id == m.document_id,
-            token.c.mode == "original",  # an error exists only in the original text by definition
             token.c.position.between(m.start_position - window, m.end_position - 1 + window),
         )
         for m in matches

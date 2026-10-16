@@ -17,7 +17,6 @@
   {% include 'main/components/analysis_nav.html' %}
 
   <div class="stack">
-    {% include 'main/components/mode_notice.html' %}
 
     {% url 'collocations_export_csv' as export_url %}
     {% include 'main/components/frequency_results.html' with item_label='Word pair' unit='pairs' export_url=export_url %}

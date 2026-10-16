@@ -29,7 +29,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.models.tables import document, token, word_type
-from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, Mode
+from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort
 
 # Safety bound for sort=left/right/document, which need the full match set
 # assembled in memory before it can be sorted (see search()'s docstring) —
@@ -43,10 +43,10 @@ class PostgresKWICRepository(KWICRepository):
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    def _match_query(self, document_ids: list[int], words: list[str], mode: Mode):
+    def _match_query(self, document_ids: list[int], words: list[str]):
         """Returns (statement, base_alias) for the START position of each
         contiguous occurrence of `words`, via an N-way self-join on Token —
-        one alias per word offset, each joined on document_id/mode matching
+        one alias per word offset, each joined on document_id matching
         the base alias and position = base.position + offset, plus a
         WordType join per alias to filter on the actual word string.
 
@@ -61,7 +61,6 @@ class PostgresKWICRepository(KWICRepository):
         from_clause = base.join(base_wt, base_wt.c.id == base.c.word_type_id)
         conditions = [
             base.c.document_id.in_(document_ids),
-            base.c.mode == mode.value,
             base_wt.c.form == words[0],
         ]
 
@@ -72,7 +71,6 @@ class PostgresKWICRepository(KWICRepository):
                 t,
                 and_(
                     t.c.document_id == base.c.document_id,
-                    t.c.mode == base.c.mode,
                     t.c.position == base.c.position + i,
                 ),
             ).join(wt, wt.c.id == t.c.word_type_id)
@@ -81,17 +79,17 @@ class PostgresKWICRepository(KWICRepository):
         stmt = select(base.c.document_id, base.c.position).select_from(from_clause).where(and_(*conditions))
         return stmt, base
 
-    async def count_matches(self, document_ids: list[int], words: list[str], mode: Mode) -> int:
+    async def count_matches(self, document_ids: list[int], words: list[str]) -> int:
         if not document_ids or not words:
             return 0
 
-        stmt, _base = self._match_query(document_ids, words, mode)
+        stmt, _base = self._match_query(document_ids, words)
         subquery = stmt.subquery()
         result = await self._session.execute(select(func.count()).select_from(subquery))
         return result.scalar_one()
 
     async def _hydrate_hits(
-        self, hit_positions: list, words: list[str], mode: Mode, window: int
+        self, hit_positions: list, words: list[str], window: int
     ) -> list[KWICHit]:
         """Turns (document_id, position) match rows into full KWICHit
         objects — the context-window + title hydration shared by every
@@ -103,7 +101,6 @@ class PostgresKWICRepository(KWICRepository):
         range_clauses = [
             and_(
                 token.c.document_id == doc_id,
-                token.c.mode == mode.value,
                 token.c.position.between(pos - window, pos + n - 1 + window),
             )
             for doc_id, pos in hit_positions
@@ -149,7 +146,6 @@ class PostgresKWICRepository(KWICRepository):
         self,
         document_ids: list[int],
         words: list[str],
-        mode: Mode,
         window: int,
         limit: int,
         offset: int,
@@ -158,7 +154,7 @@ class PostgresKWICRepository(KWICRepository):
         if not document_ids or not words:
             return []
 
-        matches, base = self._match_query(document_ids, words, mode)
+        matches, base = self._match_query(document_ids, words)
 
         if sort == KwicSort.CENTER:
             # Corpus/document order — the only sort that needs nothing but
@@ -168,7 +164,7 @@ class PostgresKWICRepository(KWICRepository):
             hit_positions = (await self._session.execute(page_query)).all()
             if not hit_positions:
                 return []
-            return await self._hydrate_hits(hit_positions, words, mode, window)
+            return await self._hydrate_hits(hit_positions, words, window)
 
         # left/right/document: the sort key (the adjacent word, or the
         # document title) only exists once a hit's context/title is
@@ -182,7 +178,7 @@ class PostgresKWICRepository(KWICRepository):
         if not hit_positions:
             return []
 
-        hits = await self._hydrate_hits(hit_positions, words, mode, window)
+        hits = await self._hydrate_hits(hit_positions, words, window)
 
         if sort == KwicSort.LEFT:
             # The single word immediately left of the match — main/views.py

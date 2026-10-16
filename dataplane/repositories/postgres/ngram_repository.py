@@ -6,7 +6,7 @@ means here (nothing above this file changed)."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataplane.repositories.base import MatchMode, Mode, NgramRepository, RankedPage, SortDirection
+from dataplane.repositories.base import MatchMode, NgramRepository, RankedPage, SortDirection
 from dataplane.repositories.postgres._aggregate_query import compute_ngram_agg_page
 
 
@@ -17,7 +17,6 @@ class PostgresNgramRepository(NgramRepository):
     async def ranked(
         self,
         document_ids: list[int],
-        mode: Mode,
         n: int,
         query: str | None,
         match_mode: MatchMode,
@@ -27,5 +26,5 @@ class PostgresNgramRepository(NgramRepository):
         offset: int,
     ) -> RankedPage:
         return await compute_ngram_agg_page(
-            self._session, document_ids, mode, n, query, match_mode, sort, direction, limit, offset
+            self._session, document_ids, n, query, match_mode, sort, direction, limit, offset
         )
