@@ -17,6 +17,10 @@ function, so none of the repository interfaces, SQL builders or worker
 aggregates need to know the filter exists. The same single-mechanism
 argument docs/feature-list.md makes for resolving taxonomy codes
 with one LIKE.
+
+Document.status is applied here too, for the same reason: it decides which
+documents a feature may see, not how the feature computes. Which statuses
+qualify depends on what the feature reads — see TOKEN_STATUSES/READY_STATUSES.
 """
 
 from sqlalchemy import and_, or_, select
@@ -26,9 +30,19 @@ from dataplane.models.tables import (
     author,
     author_mother_tongue,
     corpus_documents,
+    document,
     document_metadata,
 )
 from dataplane.repositories.base import MetadataFilter
+
+# Document.status values a feature may read (worker/tasks/indexing.py owns the
+# lifecycle: indexing -> tokenized -> ready). A feature that reads only
+# main_token — KWIC — can use a document as soon as its tokens are complete.
+# Every other feature reads DocumentWordFreq, DocumentNgram, ErrorAnnotation or
+# DocumentErrorFreq, which are guaranteed to exist only at 'ready'; admitting a
+# tokenized document there would count it as contributing nothing, silently.
+TOKEN_STATUSES = ("tokenized", "ready")
+READY_STATUSES = ("ready",)
 
 # Facet name -> (column, is_numeric). Numeric columns get no `= ''` test:
 # comparing an integer column to an empty string is a type error in Postgres.
@@ -174,6 +188,7 @@ async def resolve_document_ids(
     session: AsyncSession,
     corpus_ids: list[int],
     metadata_filter: MetadataFilter | None = None,
+    statuses: tuple[str, ...] = READY_STATUSES,
 ) -> list[int]:
     """Document ids for a corpus selection, optionally narrowed by metadata.
 
@@ -181,12 +196,20 @@ async def resolve_document_ids(
     behaving exactly as before. An empty return is already the established
     "nothing to compute" signal — every query builder guards on it — so a
     filter that matches nothing needs no new short-circuit.
+
+    `statuses` defaults to the strict READY_STATUSES, so a feature added later
+    has to opt IN to seeing documents whose aggregates aren't built yet.
     """
     if not corpus_ids:
         return []
 
     statement = select(corpus_documents.c.document_id)
-    conditions = [corpus_documents.c.corpus_id.in_(corpus_ids)]
+    conditions = [
+        corpus_documents.c.corpus_id.in_(corpus_ids),
+        # A subquery rather than a join, so the metadata joins below compose
+        # exactly as they did before this existed.
+        corpus_documents.c.document_id.in_(select(document.c.id).where(document.c.status.in_(statuses))),
+    ]
 
     if metadata_filter is not None and not metadata_filter.is_empty:
         # OUTER join, isouter=True: a document with no catalogue row must still

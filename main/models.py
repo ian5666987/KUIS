@@ -8,10 +8,12 @@ from .corpus_parsing import extract_words
 # Create your models here.
 class Document(models.Model):
     STATUS_INDEXING = 'indexing'
+    STATUS_TOKENIZED = 'tokenized'
     STATUS_READY = 'ready'
     STATUS_FAILED = 'failed'
     STATUS_CHOICES = [
         (STATUS_INDEXING, 'Indexing'),
+        (STATUS_TOKENIZED, 'Tokenized'),
         (STATUS_READY, 'Ready'),
         (STATUS_FAILED, 'Failed'),
     ]
@@ -36,15 +38,23 @@ class Document(models.Model):
     # instant it was inserted — before the task was even enqueued, and
     # permanently so if the Celery worker wasn't running to consume it, which
     # is exactly how a 0-token file came to show a green "Ready" badge in the
-    # corpus detail page. Nothing filters on this field (it is display-only),
-    # so no query's meaning changes with the default; only the honesty of
-    # what's displayed does.
+    # corpus detail page.
+    #
+    # Lifecycle: indexing -> tokenized -> ready, or failed.
+    #   tokenized — Token/WordType rows are complete; the aggregates
+    #               (DocumentWordFreq, DocumentNgram, ErrorAnnotation,
+    #               DocumentErrorFreq) are still being built, or failed to be.
+    #   ready     — all of the above exist, written in one transaction.
+    # This is NOT display-only: dataplane/repositories/shared.py::
+    # resolve_document_ids scopes every analysis by it — KWIC (which reads
+    # only Token) accepts tokenized or ready, every other feature ready only.
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_INDEXING)
 
-    # Why a document is in the status it's in — set together with `status` and
-    # only meaningful for STATUS_FAILED, where status_reason is one of
-    # main/corpus_parsing.py's REASON_* codes (a stable identifier the UI can
-    # key off) and status_detail is the human-readable sentence to show,
+    # Why a document is in the status it's in — set together with `status`.
+    # Meaningful for STATUS_FAILED, and for a STATUS_TOKENIZED document whose
+    # aggregates failed (REASON_AGGREGATE_ERROR); empty otherwise. status_reason
+    # is one of main/corpus_parsing.py's REASON_* codes (a stable identifier the
+    # UI can key off) and status_detail is the human-readable sentence to show,
     # including specifics like an XML parse error's line/column. Both are
     # cleared on every successful index, so a document that failed once and
     # was fixed doesn't keep showing a stale explanation.

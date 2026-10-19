@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import KWICHit, KWICRepository, KwicSort, MetadataFilter
-from dataplane.repositories.shared import resolve_document_ids
+from dataplane.repositories.shared import TOKEN_STATUSES, resolve_document_ids
 from dataplane.services.pagination import normalize_per_page
 
 KWIC_WINDOW_MIN = 2
@@ -62,7 +62,13 @@ class KWICService:
         # repository call: it narrows which documents are in scope, which is a
         # request-shaping concern this layer already owns (see the module
         # docstring), and leaves the repository interface untouched.
-        document_ids = await resolve_document_ids(self._session, corpus_ids, metadata_filter)
+        #
+        # TOKEN_STATUSES, not the default: KWIC reads only main_token, which is
+        # complete from 'tokenized' on — the one feature that needn't wait for
+        # the aggregates.
+        document_ids = await resolve_document_ids(
+            self._session, corpus_ids, metadata_filter, statuses=TOKEN_STATUSES
+        )
 
         if not document_ids or not words:
             return KWICSearchResult(hits=[], total=0, window=window, page=page, per_page=per_page, sort=sort)

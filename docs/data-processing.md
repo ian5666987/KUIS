@@ -66,11 +66,13 @@ Django's ORM.
 - **`Document`** — `title`, `content` (the raw XML/text, exactly as uploaded),
   `uploaded_at`, `created_at`, `user` (FK→`User`, nullable, **`CASCADE`** — the
   reason account deletion is soft), `token_count`,
-  `status` (`ready`|`indexing`|`failed`, **defaults to `indexing`** — a row exists
-  before its tokens do; only `worker/tasks/indexing.py` ever moves it),
-  `status_reason`/`status_detail` (why a `failed` document failed — a stable
-  `REASON_*` code from `main/corpus_parsing.py` plus the sentence to show; both
-  empty otherwise), `content_hash` (**unique**), `tokenized_hash`,
+  `status` (`indexing`→`tokenized`→`ready`, or `failed`; **defaults to
+  `indexing`** — a row exists before its tokens do; only `worker/tasks/indexing.py`
+  ever moves it, and the data plane scopes every feature by it — see §3),
+  `status_reason`/`status_detail` (why a `failed` document failed, or why a
+  `tokenized` one got no further — a stable `REASON_*` code from
+  `main/corpus_parsing.py` plus the sentence to show; both empty otherwise),
+  `content_hash` (**unique**), `tokenized_hash`,
   `tokenizer_version`. Index on `(user, uploaded_at)`.
   Above ~2 KB Postgres TOASTs `content` — stored out-of-line and compressed.
 - **`Corpus`** — `name` (unique), `description`, `created_by` (FK→`User`,
@@ -190,30 +192,50 @@ POST (any of six upload sites)
                  ├─ build_tokens()  → WordType rows + Token rows
                  ├─ write token_count
                  ├─ write content_hash / tokenized_hash / tokenizer_version
-                 ├─ chain → compute_document_word_freq   (DocumentWordFreq)
-                 ├─ chain → compute_document_ngrams      (DocumentNgram)
-                 └─ chain → extract_document_error_annotations (ErrorAnnotation)
-                              └─ calls compute_document_error_freq itself
-                 status: indexing → ready   (or failed + a REASON_* code)
+                 ├─ status: indexing → tokenized   (or failed + a REASON_* code)
+                 └─ aggregate_document.delay(doc.id)
+                      └─ ONE transaction, in this order:
+                           compute_document_word_freq          (DocumentWordFreq)
+                           compute_document_ngrams             (DocumentNgram)
+                           extract_document_error_annotations  (ErrorAnnotation)
+                           compute_document_error_freq         (DocumentErrorFreq)
+                           status: tokenized → ready
+                      (on error: rolled back; stays tokenized + aggregate_error)
 ```
 
-**Why the chain is shaped that way.** `extract_document_error_annotations` calls
-`compute_document_error_freq` **itself** rather than being a second `.delay()`
-from `index_document` — two unordered `.delay()` calls give no guarantee the
-annotations exist before the aggregate reads them.
+**What each status admits.** `dataplane/repositories/shared.py::resolve_document_ids`
+filters every feature's document set by status, according to what the feature
+reads:
 
-> **`status = ready` does not mean the aggregates exist.**
-> `worker/tasks/indexing.py`'s own docstring claims it does, but the code sets
-> `ready` *before* dispatching `compute_document_word_freq`,
-> `compute_document_ngrams` and `extract_document_error_annotations`
-> fire-and-forget. **A `ready` document with zero aggregates is a reachable
-> state**, and because the three tasks are dispatched separately a document can
-> end up with n-grams but no word frequencies. When an analysis feature returns
-> empty while KWIC works, suspect this first — frequency reads
-> `main_documentwordfreq` while KWIC reads raw `main_token`. Diagnose by
-> comparing `Token` against `DocumentWordFreq` row counts per document; repair
-> with `backfill_tier2` and `backfill_error_annotations`, which run in-process
-> and bypass Celery entirely.
+| Status | Derived rows that exist | KWIC | Frequency, N-grams, Collocations, Error Frequency, EPIC, Error Summary |
+|---|---|---|---|
+| `indexing` | none yet (or a re-index's stale ones) | — | — |
+| `tokenized` | `Token` | ✅ | — |
+| `ready` | `Token` + all four aggregates | ✅ | ✅ |
+| `failed` | none (tokens deleted) | — | — |
+
+`ready` is a promise that **every** derived table exists, error annotations
+included. That matters most for the error features, where an empty result is a
+legitimate answer: a document with no rows in `ErrorAnnotation` might mean "this
+learner made no annotated errors" or "extraction never ran", and the tables alone
+can't tell those apart. The status can.
+
+**Why the aggregates are one task, in one transaction.** Separately dispatched
+`.delay()` calls have no single point where "all of them finished" is known, which
+is how `ready` used to be set *before* the aggregates were dispatched
+fire-and-forget. That left `ready` documents with zero aggregates, or with n-grams
+but no word frequencies. Running the four in sequence inside one transaction also
+orders extraction before the error aggregate that reads it, and the status flip
+commits with the rows. A reader therefore never sees `ready` ahead of the data. The
+split into two tasks is what makes `tokenized` observable: `aggregate_document` is
+queued *behind* every `index_document` already waiting, so a batch upload becomes
+searchable in KWIC file by file.
+
+**A document stuck at `tokenized`** (a lost message, a killed worker, or an
+`aggregate_error`) is finished by `python manage.py aggregate_documents`, which
+runs `aggregate_document` in-process for every `tokenized` document and bypasses
+Celery entirely. Migration `0018` moved any `ready` document missing derived rows
+back to `tokenized` for the same command to finish.
 
 **Idempotence.** `index_document` deletes before inserting, so a re-run never
 doubles up; the same is true of the aggregate and annotation tasks. Writes are
@@ -236,8 +258,8 @@ wrapped in `transaction.atomic()` with `bulk_create(batch_size=5000)`.
   **every task dies with `ValueError: not enough values to unpack` before the task
   body executes** — so there is no traceback from project code. Two workers
   sharing one Redis queue is worse than one broken worker: whichever instance
-  grabs a message decides whether a document gets its aggregates, leaving
-  documents in mixed states.
+  grabs a message decides whether a document gets its aggregates, leaving some
+  documents stuck at `tokenized`.
 - **`Token` rows go stale on content edits.** Nothing re-indexes a document whose
   `content` is edited afterwards. `tokenized_hash` exists to detect exactly that
   (`tokenized_hash IS DISTINCT FROM content_hash`) but **that check is not

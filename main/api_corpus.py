@@ -86,7 +86,8 @@ class CorpusDetailSerializer(CorpusSerializer):
                 "uploaded_at": doc.uploaded_at,
                 "token_count": doc.token_count,
                 "status": doc.status,
-                # Empty unless status is 'failed' — the corpus detail table is
+                # Empty unless status is 'failed', or 'tokenized' with failed
+                # aggregates (aggregate_error) — the corpus detail table is
                 # where a failed file is actually looked at, so the reason
                 # travels with it rather than needing a per-document fetch.
                 "status_reason": doc.status_reason,

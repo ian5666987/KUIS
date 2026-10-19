@@ -265,10 +265,6 @@ data plane tests fail. The data plane fixture **refuses a `DB_NAME` without
   started.
 - `worker/tasks/maintenance.py` doesn't exist — `retokenize` stays a management
   command, and there is no automatic staleness check.
-- **`Document.status = ready` does not guarantee the Tier-2 aggregates exist**,
-  despite `worker/tasks/indexing.py`'s docstring saying it does — the status is
-  set before the aggregate tasks are dispatched fire-and-forget. See
-  `docs/data-processing.md` §3.
 - KUIS-FE controls for the `gender`/`mother_tongue` facets are not built; the API
   serves them and the Django surface renders them.
 - `KUIS-FE/README.md`'s phase table is stale (describes dashboard pages as stubs).

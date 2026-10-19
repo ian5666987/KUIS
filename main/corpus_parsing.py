@@ -151,6 +151,10 @@ REASON_XML_NO_BODY = 'xml_no_body'
 REASON_NO_TOKENS = 'no_tokens'
 REASON_WORKER_ERROR = 'worker_error'
 REASON_NEVER_INDEXED = 'never_indexed'
+# The one code that is NOT paired with STATUS_FAILED: tokens are intact, so the
+# document stays 'tokenized' (searchable in KWIC) and this explains why it never
+# went on to 'ready'. See worker/tasks/indexing.py::aggregate_document.
+REASON_AGGREGATE_ERROR = 'aggregate_error'
 
 REASON_MESSAGES = {
     REASON_EMPTY_CONTENT: 'The file is empty — there is no text to index.',
@@ -159,6 +163,10 @@ REASON_MESSAGES = {
     REASON_NO_TOKENS: 'The file parsed, but no words could be extracted from it.',
     REASON_WORKER_ERROR: 'Indexing failed unexpectedly.',
     REASON_NEVER_INDEXED: 'Indexing never ran for this document — most often the upload landed while the Celery worker was down.',
+    REASON_AGGREGATE_ERROR: (
+        'The text was tokenized, but building its analysis data failed — it is searchable in KWIC '
+        'but not included in frequency, n-grams, collocations or error analysis.'
+    ),
 }
 
 # ElementTree's ParseError messages are precise about WHERE but say nothing

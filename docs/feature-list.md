@@ -277,9 +277,10 @@ exercising the tiers against all three surfaces without hand-editing users.
 | `load_error_taxonomy` | Loads the ~90-code taxonomy from `info/error.xml` into `ErrorTaxonomyNode`. Replaces the whole table each run. **Run before uploading documents** — annotations resolve against this table at extraction time |
 | `load_metadata_catalogue [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/*.csv` (1,557 entries from 1,559 rows) into `DocumentMetadata` and links each row to its `Document`. Idempotent; `--relink` re-resolves FKs without reading any CSV |
 | `load_author_metadata [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/authors/*.csv` (235 authors + 226 mother tongues from 437 rows) into `Author`/`AuthorMotherTongue`, linking on `(university, name_code)`. **Exits non-zero when the source data has an error** — by design; run `--dry-run` first and read the report |
-| `retokenize [--dry-run]` | Rebuilds all `Token` rows from current `Document.content` **and** refreshes the Tier-2 aggregates. Run after changing tokenization logic or editing a document's content |
-| `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens |
-| `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the taxonomy was loaded. Does not rebuild tokens |
+| `retokenize [--dry-run]` | Rebuilds all `Token` rows from current `Document.content` **and** dispatches `aggregate_document` to refresh everything derived from them. Documents reach `ready` once the worker runs it (else finish them with `aggregate_documents`). Run after changing tokenization logic or editing a document's content |
+| `aggregate_documents` | Finishes every document stuck at `tokenized`: builds all four aggregates in-process and moves it to `ready`, reporting any that still fail. Does not rebuild tokens |
+| `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens or change `status` |
+| `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the taxonomy was loaded. Does not rebuild tokens or change `status` |
 | `backfill_content_hash` | Recomputes `content_hash` with the canonicalized formula. Only relevant to databases predating migration `0010`; reports collision groups rather than merging them |
 
 ---

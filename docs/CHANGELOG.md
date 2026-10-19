@@ -51,6 +51,7 @@ SSH deploy on `workflow_dispatch`.
 | **7.7** | 2026-10-02 | Document metadata catalogue + secondary filters (migration `0014`). University/year/grade/name-code facets composing with corpus selection on every analysis feature, both surfaces |
 | **7.8** | 2026-10-13 | Author (person-level) metadata + `gender`/`mother_tongue` facets (migration `0015`). Backend and the Django surface; KUIS-FE controls pending |
 | **7.9** | 2026-10-16 | Corrected text mode removed to save space (migration `0017`). Only the text as written is tokenized; the `mode` column is gone from `Token`/`DocumentWordFreq`/`DocumentNgram` along with `Document.token_count_corrected`, roughly halving all three tables. The `corrected` param is dropped from every analysis endpoint and the toggle from both UIs. A segment's correction is still stored and shown via `ErrorAnnotation.correction_text` |
+| **7.10** | 2026-10-19 | `tokenized` document status (migration `0018`). Indexing split into `index_document` (→ `tokenized`) and `aggregate_document` (→ `ready`, all four derived tables plus the status flip in one transaction). The data plane now scopes by status: KWIC accepts `tokenized`/`ready`, every other feature `ready` only. `ready` used to be set before the aggregates were dispatched fire-and-forget, so it guaranteed nothing about them. New `aggregate_documents` repair command; KUIS-FE shows the new state |
 | **8** | — | ⬜ **Not started.** Caching (Tier 4) + retiring the superseded Django live-parse views |
 
 Test-suite growth, for scale: 29 Django tests at Phase 0 → 229 today, plus 170

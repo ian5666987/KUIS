@@ -6,8 +6,10 @@ changing what is counted, and the table controls (filter, sort, paginate,
 export) agreeing with each other.
 """
 
+import importlib
 import json
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.core import mail
@@ -734,7 +736,7 @@ class WorkerTaskTests(TestCase):
         from .models import DocumentNgram, DocumentWordFreq
 
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
-        index_document(doc.id)  # chains both aggregate tasks internally
+        index_document(doc.id)  # dispatches aggregate_document, eager under test
 
         word_freqs = DocumentWordFreq.objects.filter(document=doc)
         self.assertTrue(word_freqs.exists())
@@ -861,6 +863,217 @@ class WorkerTaskTests(TestCase):
         self.assertEqual(doc.status, Document.STATUS_READY)
         self.assertTrue(doc.tokens.exists())
         self.assertTrue(DocumentWordFreq.objects.filter(document=doc).exists())
+
+
+def _tokenize_only(title, content):
+    """index_document with its aggregate_document dispatch held back — the
+    state a document sits in while its aggregates are still queued behind
+    other uploads (or were never delivered)."""
+    doc = Document.objects.create(title=title, content=content)
+    with mock.patch('worker.tasks.indexing.aggregate_document.delay') as dispatch:
+        index_document(doc.id)
+    dispatch.assert_called_once_with(doc.id)
+    doc.refresh_from_db()
+    return doc
+
+
+class DocumentStatusLifecycleTests(TestCase):
+    """indexing -> tokenized -> ready (worker/tasks/indexing.py). `ready` has to
+    mean every derived table exists: the data plane admits a document to every
+    feature but KWIC only at `ready` (dataplane/repositories/shared.py)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+    def test_index_document_stops_at_tokenized(self):
+        from .models import DocumentWordFreq, ErrorAnnotation
+
+        doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
+
+        self.assertEqual(doc.status, Document.STATUS_TOKENIZED)
+        self.assertTrue(doc.tokens.exists())
+        self.assertFalse(DocumentWordFreq.objects.filter(document=doc).exists())
+        self.assertFalse(ErrorAnnotation.objects.filter(document=doc).exists())
+
+    def test_aggregate_document_builds_every_derived_table_then_marks_ready(self):
+        from .models import DocumentErrorFreq, DocumentNgram, DocumentWordFreq, ErrorAnnotation
+        from worker.tasks.indexing import aggregate_document
+
+        doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
+        aggregate_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertTrue(DocumentWordFreq.objects.filter(document=doc).exists())
+        self.assertTrue(DocumentNgram.objects.filter(document=doc).exists())
+        self.assertTrue(ErrorAnnotation.objects.filter(document=doc).exists())
+        self.assertTrue(DocumentErrorFreq.objects.filter(document=doc).exists())
+
+    def test_aggregate_failure_rolls_back_and_keeps_the_document_tokenized(self):
+        from .models import DocumentWordFreq
+        from worker.tasks.indexing import aggregate_document
+
+        doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
+        with mock.patch('worker.tasks.indexing.compute_document_ngrams', side_effect=RuntimeError('disk full')):
+            with self.assertRaises(RuntimeError):
+                aggregate_document(doc.id)
+
+        doc.refresh_from_db()
+        # Tokens are fine, so it stays in KWIC rather than failing outright...
+        self.assertEqual(doc.status, Document.STATUS_TOKENIZED)
+        self.assertTrue(doc.tokens.exists())
+        # ...with the reason it got no further.
+        self.assertEqual(doc.status_reason, 'aggregate_error')
+        self.assertIn('RuntimeError: disk full', doc.status_detail)
+        # Word frequencies were built BEFORE the failure and rolled back with
+        # it — never a document with half its aggregates.
+        self.assertFalse(DocumentWordFreq.objects.filter(document=doc).exists())
+
+    def test_rerun_after_an_aggregate_failure_reaches_ready_and_clears_the_reason(self):
+        from worker.tasks.indexing import aggregate_document
+
+        doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
+        with mock.patch('worker.tasks.indexing.compute_document_ngrams', side_effect=RuntimeError('disk full')):
+            with self.assertRaises(RuntimeError):
+                aggregate_document(doc.id)
+
+        aggregate_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        self.assertEqual(doc.status_reason, '')
+        self.assertEqual(doc.status_detail, '')
+
+    def test_aggregate_document_leaves_a_document_not_at_tokenized_alone(self):
+        from .models import DocumentWordFreq
+        from worker.tasks.indexing import aggregate_document
+
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)  # never tokenized
+        aggregate_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_INDEXING)
+        self.assertFalse(DocumentWordFreq.objects.filter(document=doc).exists())
+
+    def test_reindex_during_aggregation_is_not_marked_ready(self):
+        from worker.tasks.indexing import aggregate_document
+
+        doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
+
+        def reindex_starts_meanwhile(document_id):
+            Document.objects.filter(id=document_id).update(status=Document.STATUS_INDEXING)
+            return 0
+
+        with mock.patch('worker.tasks.indexing.compute_document_error_freq', side_effect=reindex_starts_meanwhile):
+            aggregate_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_INDEXING)
+
+
+class TokenizedStatusMigrationTests(TestCase):
+    """main/migrations/0018_document_status_tokenized.py's data step: `ready`
+    documents missing derived rows (the old fire-and-forget's leftovers) go
+    back to `tokenized`; complete ones are untouched."""
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('load_error_taxonomy', stdout=StringIO())
+
+    def _ready(self, title, content):
+        doc = Document.objects.create(title=title, content=content)
+        index_document(doc.id)
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_READY)
+        return doc
+
+    def _migrate(self):
+        from django.apps import apps
+
+        migration = importlib.import_module('main.migrations.0018_document_status_tokenized')
+        migration.demote_incomplete_ready_documents(apps, None)
+
+    def _status(self, doc):
+        doc.refresh_from_db()
+        return doc.status
+
+    def test_demotes_only_ready_documents_missing_derived_rows(self):
+        from .models import DocumentErrorFreq, DocumentNgram, DocumentWordFreq, ErrorAnnotation
+
+        # content_hash is unique, so every document needs distinct content.
+        def variant(word):
+            return NESTED_CORPUS_XML.replace('sekali', word)
+
+        complete = self._ready('complete.xml', variant('sekali'))
+        plain = self._ready('plain.txt', PLAIN_TEXT)  # no <segment>: zero annotations is correct
+
+        no_word_freq = self._ready('no-word-freq.xml', variant('dua'))
+        DocumentWordFreq.objects.filter(document=no_word_freq).delete()
+
+        no_ngrams = self._ready('no-ngrams.xml', variant('tiga'))
+        DocumentNgram.objects.filter(document=no_ngrams).delete()
+
+        no_annotations = self._ready('no-annotations.xml', variant('empat'))
+        ErrorAnnotation.objects.filter(document=no_annotations).delete()
+        DocumentErrorFreq.objects.filter(document=no_annotations).delete()
+
+        no_error_freq = self._ready('no-error-freq.xml', variant('lima'))
+        DocumentErrorFreq.objects.filter(document=no_error_freq).delete()
+
+        self._migrate()
+
+        self.assertEqual(self._status(complete), Document.STATUS_READY)
+        self.assertEqual(self._status(plain), Document.STATUS_READY)
+        for doc in (no_word_freq, no_ngrams, no_annotations, no_error_freq):
+            self.assertEqual(self._status(doc), Document.STATUS_TOKENIZED, doc.title)
+
+    def test_leaves_failed_and_indexing_documents_alone(self):
+        failed = Document.objects.create(title='empty.xml', content='')
+        index_document(failed.id)
+        never_indexed = Document.objects.create(title='t.xml', content=CORPUS_XML)
+
+        self._migrate()
+
+        self.assertEqual(self._status(failed), Document.STATUS_FAILED)
+        self.assertEqual(self._status(never_indexed), Document.STATUS_INDEXING)
+
+
+class AggregateDocumentsCommandTests(TestCase):
+    """main/management/commands/aggregate_documents.py — the repair path for
+    documents stuck at `tokenized`."""
+
+    def test_finishes_tokenized_documents_and_skips_the_rest(self):
+        ready = Document.objects.create(title='ready.xml', content=CORPUS_XML)
+        index_document(ready.id)
+        stuck = _tokenize_only('stuck.txt', PLAIN_TEXT)
+
+        out = StringIO()
+        call_command('aggregate_documents', stdout=out)
+
+        stuck.refresh_from_db()
+        self.assertEqual(stuck.status, Document.STATUS_READY)
+        self.assertIn('stuck.txt: ready', out.getvalue())
+        self.assertNotIn('ready.xml', out.getvalue())
+
+    def test_reports_a_document_that_still_fails_and_carries_on(self):
+        first = _tokenize_only('first.txt', PLAIN_TEXT)
+        second = _tokenize_only('second.xml', CORPUS_XML)
+
+        from worker.tasks.aggregates import compute_document_word_freq as real
+
+        def fail_on_first(document_id):
+            if document_id == first.id:
+                raise RuntimeError('boom')
+            return real(document_id)
+
+        out = StringIO()
+        with mock.patch('worker.tasks.indexing.compute_document_word_freq', side_effect=fail_on_first):
+            call_command('aggregate_documents', stdout=out)
+
+        self.assertIn('first.txt: still tokenized (aggregate_error)', out.getvalue())
+        self.assertIn('second.xml: ready', out.getvalue())
+        self.assertIn('Aggregated 1 of 2', out.getvalue())
 
 
 class CorpusCrudApiTests(ExplorerTestCase):
@@ -1478,8 +1691,8 @@ class CorpusParsingTests(TestCase):
 
 class ErrorAnnotationWorkerTaskTests(TestCase):
     """worker/tasks/error_annotations.py (docs/feature-list.md) —
-    extraction + Tier-2 aggregation, chained from
-    worker/tasks/indexing.py::index_document. Loads the real taxonomy
+    extraction + Tier-2 aggregation, run by
+    worker/tasks/indexing.py::aggregate_document. Loads the real taxonomy
     (info/error.xml) so raw_features actually resolve, same as production."""
 
     @classmethod
@@ -1490,7 +1703,7 @@ class ErrorAnnotationWorkerTaskTests(TestCase):
         from .models import ErrorAnnotation
 
         doc = Document.objects.create(title='n.xml', content=NESTED_CORPUS_XML)
-        index_document(doc.id)  # chains extract_document_error_annotations internally
+        index_document(doc.id)  # aggregate_document runs the extraction, eager under test
 
         annotations = ErrorAnnotation.objects.filter(document=doc).order_by('start_position')
         self.assertEqual(annotations.count(), 2)
@@ -1565,9 +1778,9 @@ class ErrorAnnotationWorkerTaskTests(TestCase):
         self.assertEqual(ErrorAnnotation.objects.filter(document=doc).count(), first_count)
 
     def test_index_document_chains_annotations_before_freq_via_delay(self):
-        # Pins the ordering fix: compute_document_error_freq is chained
-        # from INSIDE extract_document_error_annotations, not fired as a
-        # second independent .delay() from index_document — so by the time
+        # Pins the ordering: worker/tasks/indexing.py::aggregate_document
+        # runs extraction, then the aggregate that reads it, in sequence —
+        # not as two independent .delay()s — so by the time
         # index_document.delay() returns under CELERY_TASK_ALWAYS_EAGER=1,
         # both ErrorAnnotation and DocumentErrorFreq exist.
         from .models import DocumentErrorFreq, ErrorAnnotation

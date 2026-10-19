@@ -8,11 +8,12 @@ technique main/models.py::build_tokens() uses for its self-referential
 WordType resolution, here for ErrorAnnotation's self-referential `parent`
 FK.
 
-compute_document_error_freq is called from INSIDE
-extract_document_error_annotations rather than as a second independent
-`.delay()` from worker/tasks/indexing.py::index_document() — two
-unordered `.delay()` calls give no guarantee the annotations exist before
-the aggregate task reads them.
+Neither task dispatches the other. worker/tasks/indexing.py::
+aggregate_document calls them in order — extraction, then the aggregate that
+reads it — inside the one transaction that also marks the document ready; the
+backfill command calls them in the same order. (extract used to `.delay()`
+the aggregate itself, which kept the ordering but meant nothing knew when
+DocumentErrorFreq had actually been written.)
 """
 
 from django.db import transaction
@@ -81,13 +82,7 @@ def extract_document_error_annotations(document_id: int) -> int:
             if to_update:
                 ErrorAnnotation.objects.bulk_update(to_update, ['parent_id'], batch_size=5000)
 
-    count = len(raw_annotations)
-    # Fire-and-forget under a real broker; synchronous under
-    # CELERY_TASK_ALWAYS_EAGER=1 (tests) — same convention
-    # worker/tasks/indexing.py::index_document already uses for its own
-    # chained aggregate tasks.
-    compute_document_error_freq.delay(document_id)
-    return count
+    return len(raw_annotations)
 
 
 @app.task

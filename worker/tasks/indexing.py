@@ -6,18 +6,39 @@ main/views.py's corpus_create/corpus_edit/upload_document via
 `index_document.delay(doc.id)` right after doc.save() — the signal itself
 is gone (see main/models.py's NOTE at the bottom of that file).
 
-Chains into the two aggregate tasks (worker/tasks/aggregates.py) so
-Document.status only reaches 'ready' once tokens AND Tier-2 aggregates both
-exist — a caller polling status sees either 'indexing' or a fully-usable
-'ready' document, never a half-finished state.
+Indexing is two tasks, and each advances Document.status one step:
 
-This task is the ONLY writer of Document.status/status_reason/status_detail.
-A document that never reaches it stays at the model's 'indexing' default
-forever, which is the truthful reading of "the worker hasn't touched this" —
-and the reason that default is no longer 'ready' (see main/models.py).
+    index_document      indexing -> tokenized   (or failed + a REASON_* code)
+    aggregate_document  tokenized -> ready      (or stays tokenized +
+                                                 REASON_AGGREGATE_ERROR)
+
+The split is what `tokenized` exists to expose. KWIC reads only Token rows, so
+a tokenized document is already searchable there; every other analysis feature
+reads an aggregate or the error tables, and dataplane/repositories/shared.py::
+resolve_document_ids admits a document to those only once it is `ready`. And
+because aggregate_document is queued BEHIND every index_document already in
+the queue, a batch upload becomes searchable in KWIC file by file, without
+waiting on the whole batch's aggregates.
+
+`ready` means every derived table exists: DocumentWordFreq, DocumentNgram,
+ErrorAnnotation and DocumentErrorFreq, built by one task in one transaction
+together with the status flip — never a document with n-grams but no word
+frequencies, and never a `ready` badge in front of aggregates still being
+written.
+
+These two tasks are the ONLY writers of Document.status/status_reason/
+status_detail. A document that never reaches index_document stays at the
+model's 'indexing' default forever, which is the truthful reading of "the
+worker hasn't touched this" — and the reason that default is no longer
+'ready' (see main/models.py). One that reaches tokenized but never gets its
+aggregate_document (lost message, worker killed) stays 'tokenized', equally
+truthfully; `manage.py aggregate_documents` finishes it.
 """
 
+from django.db import transaction
+
 from main.corpus_parsing import (
+    REASON_AGGREGATE_ERROR,
     REASON_MESSAGES,
     REASON_NO_TOKENS,
     REASON_WORKER_ERROR,
@@ -27,7 +48,7 @@ from main.document_ingest import compute_content_hash
 from main.models import Document, Token, build_tokens
 from worker.celery_app import app
 from worker.tasks.aggregates import compute_document_ngrams, compute_document_word_freq
-from worker.tasks.error_annotations import extract_document_error_annotations
+from worker.tasks.error_annotations import compute_document_error_freq, extract_document_error_annotations
 
 # Bumped whenever main/corpus_parsing.py's tokenization logic changes in a
 # way that would produce different tokens for the same content — nothing
@@ -104,7 +125,7 @@ def index_document(document_id: int) -> int:
         # reindexing — see data-processing.md §4.
         document.tokenized_hash = content_hash
         document.tokenizer_version = TOKENIZER_VERSION
-        document.status = Document.STATUS_READY
+        document.status = Document.STATUS_TOKENIZED
         document.status_reason = ""
         document.status_detail = ""
         document.save(
@@ -132,16 +153,58 @@ def index_document(document_id: int) -> int:
 
     # Fire-and-forget under a real broker; synchronous under
     # CELERY_TASK_ALWAYS_EAGER=1 (tests) — either way, by the time
-    # index_document.delay(...) returns in eager mode, Tier-2 aggregates
-    # exist too.
-    compute_document_word_freq.delay(document_id)
-    compute_document_ngrams.delay(document_id)
-    # Error annotations are a separate concern from tokens/word-freq/ngrams
-    # (docs/feature-list.md) — status above is intentionally NOT
-    # gated on this completing; it has its own eventual-consistency window.
-    # compute_document_error_freq is chained from inside this task, not
-    # fired independently here, so it never races ahead of the annotations
-    # it reads.
-    extract_document_error_annotations.delay(document_id)
+    # index_document.delay(...) returns in eager mode, the document is ready.
+    aggregate_document.delay(document_id)
+
+    return document_id
+
+
+@app.task
+def aggregate_document(document_id: int) -> int:
+    """tokenized -> ready. Builds every derived table the analysis features
+    read besides Token itself, then marks the document ready — all in ONE
+    transaction, so a reader sees either the previous state or the finished
+    one.
+
+    The four builders run in a fixed order, as plain function calls rather than
+    separate .delay()s: two unordered .delay() calls give no guarantee the
+    error annotations exist before compute_document_error_freq reads them, and
+    separately dispatched tasks have no single point at which "all of them
+    finished" is known — which is exactly how `ready` used to be set without
+    them."""
+    document = Document.objects.get(id=document_id)
+    if document.status != Document.STATUS_TOKENIZED:
+        # Re-indexed since this was queued (back to 'indexing', with its own
+        # aggregate_document coming), failed, or a duplicate message for a
+        # document that already finished. None of those is this run's to
+        # advance.
+        return document_id
+
+    try:
+        with transaction.atomic():
+            compute_document_word_freq(document_id)
+            compute_document_ngrams(document_id)
+            extract_document_error_annotations(document_id)
+            compute_document_error_freq(document_id)
+
+            # Conditional on still being tokenized: if index_document re-ran
+            # while the aggregates were being built, the status is back at
+            # 'indexing' and these rows are about to be replaced — this run
+            # must not be the one that says 'ready'.
+            Document.objects.filter(id=document_id, status=Document.STATUS_TOKENIZED).update(
+                status=Document.STATUS_READY,
+                status_reason="",
+                status_detail="",
+            )
+    except Exception as error:
+        # The transaction rolled back, so no partial aggregates were left
+        # behind. The tokens are still good, so the document stays tokenized
+        # (still in KWIC) rather than failing outright — status_reason says
+        # why it got no further.
+        Document.objects.filter(id=document_id, status=Document.STATUS_TOKENIZED).update(
+            status_reason=REASON_AGGREGATE_ERROR,
+            status_detail=f"{REASON_MESSAGES[REASON_AGGREGATE_ERROR]} ({type(error).__name__}: {error})",
+        )
+        raise
 
     return document_id

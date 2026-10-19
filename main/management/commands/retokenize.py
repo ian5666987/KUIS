@@ -9,12 +9,14 @@ class Command(BaseCommand):
     help = (
         "Regenerates Token rows for every Document from its current content, "
         "using the XML-aware tokenizer (main.corpus_parsing), and dispatches "
-        "the Tier-2 aggregate recomputation (DocumentWordFreq/DocumentNgram) "
-        "that would otherwise go stale against the rebuilt tokens. Token "
-        "rebuilding happens synchronously as this command runs; the aggregate "
-        "recomputation is dispatched via Celery like any other indexing job, "
-        "so a worker process must be running (or CELERY_TASK_ALWAYS_EAGER=1 "
-        "set) for it to actually complete. Use this after changing "
+        "aggregate_document to rebuild everything derived from them "
+        "(DocumentWordFreq/DocumentNgram/ErrorAnnotation/DocumentErrorFreq), "
+        "which would otherwise go stale against the rebuilt tokens. Token "
+        "rebuilding happens synchronously as this command runs, leaving each "
+        "document 'tokenized'; aggregate_document is dispatched via Celery "
+        "like any other indexing job, so a worker process must be running "
+        "(or CELERY_TASK_ALWAYS_EAGER=1 set) for documents to reach 'ready' "
+        "— otherwise finish them with aggregate_documents. Use this after changing "
         "tokenization logic to fix documents that were tokenized before the "
         "change."
     )
@@ -85,7 +87,7 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(
                     f"[{i}/{total}] {document.title}: "
-                    f"{document.token_count} tokens"
+                    f"{document.token_count} tokens ({document.status})"
                 )
 
         self.stdout.write(self.style.SUCCESS(f"Retokenized {total} document(s)."))
