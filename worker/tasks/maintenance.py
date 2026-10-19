@@ -19,11 +19,11 @@ A document is stale for one of three reasons, checked in this order:
                         none of which reindex.
 
 content_changed is decided by hashing `content` afresh, not by comparing
-tokenized_hash against the stored content_hash column. Only the upload path and
-index_document ever write content_hash, so an edit made anywhere else changes
-`content` and leaves content_hash as it was — the column comparison
-(`tokenized_hash IS DISTINCT FROM content_hash`) cannot see the very edit it
-was meant to catch. Hashing means reading every document's content, so the
+tokenized_hash against the stored content_hash column. Document.save() keeps
+content_hash in step with `content`, but an edit that bypasses save() — a
+QuerySet.update(), raw SQL — changes `content` and leaves content_hash as it
+was, and the column comparison (`tokenized_hash IS DISTINCT FROM content_hash`)
+cannot see that edit. Hashing means reading every document's content, so the
 scan streams it in chunks rather than loading the corpus into memory.
 
 A document that failed on its content (malformed XML, no words) is NOT stale:

@@ -157,9 +157,16 @@ constraint, `Corpus.is_public`, the three error-analytics models, `UserProfile`,
 `DocumentMetadata`, `Author`+`AuthorMotherTongue`, and the `status_reason`/
 `status_detail` columns.
 
-> **All 16 migrations are applied to `corpus_db`**, and both metadata sets are
-> loaded there (verified 2026-10-14). Earlier docs said otherwise; that is no
-> longer true. The one residue is a stale `Author` row — §7.
+> **All 18 migrations are applied to `corpus_db`**, and both metadata sets are
+> loaded there. `0017`/`0018` landed only on 2026-10-19 — until then the
+> corrected-text stream was still in `Token`/`DocumentWordFreq`/`DocumentNgram`
+> (every `ready` document had about twice its `token_count` in rows), and since
+> the code no longer sets `mode`, any real re-index would have failed on its
+> `NOT NULL`. `python manage.py migrate --plan` is the check; a `retokenize
+> --dry-run` cannot see it. Every document but `TUFS.csv` (§9, open defects) was
+> rebuilt with `index_document` the same day, which also filled in
+> `DocumentErrorFreq` for five documents that had annotations but no counts. The
+> one other residue is a stale `Author` row — §7.
 
 ### The mirror, and why it is dangerous
 
@@ -260,10 +267,10 @@ reasons:
 | `content_changed` | a fresh hash of `content` differs from `tokenized_hash` — edited in the admin, the shell or SQL |
 
 The content check **re-hashes `content`** rather than comparing
-`tokenized_hash` against the `content_hash` column, because only uploads and
-`index_document` write `content_hash`: after an admin edit the two columns
-still agree, so the plain-SQL `tokenized_hash IS DISTINCT FROM content_hash`
-would miss exactly the edit it was meant to catch. Re-hashing means reading
+`tokenized_hash` against the `content_hash` column. `Document.save()` keeps
+`content_hash` in step with `content` (§4), but an edit that bypasses `save()` —
+`QuerySet.update()`, raw SQL — leaves the two columns agreeing, so the plain-SQL
+`tokenized_hash IS DISTINCT FROM content_hash` would miss it. Re-hashing means reading
 every document's content, so the scan streams it 100 rows at a time with
 `.iterator()`. A document that failed **on its content** (malformed XML, no
 words) records the hash it failed on, so it is not retried on every sweep, only
@@ -332,6 +339,14 @@ query**. The hash is now the actual dedup key, computed *before* the row exists.
 - **Race-safe via a DB unique constraint**, resolved with `get_or_create()` rather
   than a hand-rolled check-then-create (a TOCTOU race for two simultaneous
   uploads of new content).
+- **Kept in step with every edit.** `Document.save()` recomputes `content_hash`
+  whenever it writes `content`, so an edit in the admin or the shell moves the
+  dedup key with the text: the old text uploads as a new document, the new text
+  dedups onto the edited one. The admin refuses an edit whose text another
+  document already has (a form error, not an `IntegrityError`) and shows the
+  three hash/version columns read-only. An edit that bypasses `save()` —
+  `QuerySet.update()`, raw SQL — still leaves the key stale until the next
+  `index_document`, which recomputes it.
 - **One shared row, no ownership split.** A dedup hit reuses the existing document
   as-is; `title`/`user` live in `get_or_create`'s `defaults`, so whichever upload
   won owns it, and the second uploader never overwrites it.
@@ -340,10 +355,11 @@ query**. The hash is now the actual dedup key, computed *before* the row exists.
   only one `Document` exists, only one entry can claim it, and the second stays
   unlinked — reported by the import as awaiting upload.
 
-The formula is defined once, in `main/document_ingest.py`
-(`canonicalize_for_hash`, `compute_content_hash`, `get_or_create_document`), and
-imported by every upload site **and** by `worker/tasks/indexing.py` so
-upload-time and post-index hashes can never drift. Call sites: `main/views.py`
+The formula is defined once, in `main/content_hash.py` (`canonicalize_for_hash`,
+`compute_content_hash` — its own module so `main/models.py` can import it), and
+re-exported with `get_or_create_document` by `main/document_ingest.py`, which every
+upload site **and** `worker/tasks/indexing.py` import, so upload-time, save-time
+and post-index hashes can never drift. Call sites: `main/views.py`
 (`corpus_create`, `corpus_edit`, `upload_document`),
 `main/api_documents.py::DocumentUploadView`, `main/api_corpus.py`
 (`CorpusListView`, `CorpusDetailView`). **A seventh upload path must go through
@@ -866,9 +882,10 @@ metadata" code path anywhere**. Django's ORM reaches the same thing:
 ### The multi-valued facet uses `EXISTS`, not a join
 
 A join through `AuthorMotherTongue` yields two rows for a two-tongue writer, and
-`main/views.py::_analysis_context` sums `token_count` over that same queryset —
-`.distinct()` dedupes *rows*, not an aggregate over them, so that writer's tokens
-would be counted twice. `EXISTS` asks the membership question without touching
+`main/views.py::_analysis_context` sums `token_count` over that same queryset, so
+that writer's tokens would be counted twice. (Corpus overlap is the same problem;
+`_get_selected_documents` solves it the same way, matching on membership instead
+of joining.) `EXISTS` asks the membership question without touching
 cardinality. `NOT EXISTS` is then the complete "(no value)" term on its own: true
 for a document with no catalogue row, one with no author, and an author with no
 tongue rows alike — the same three-in-one equivalence the column facets get from
@@ -1008,16 +1025,18 @@ for what the filter carries is `MetadataFilter` in
 
 ### Open defects and gaps
 
-- **An admin edit leaves `content_hash` — the dedup key — describing the old
-  content** until the document is re-indexed. In that window, an upload of the old
-  text dedups onto the edited document, and an upload of the new text creates a
-  second copy.
-- **No `defer('content')` on analysis querysets** (`_get_selected_documents`), so
-  full document text is loaded even where only counts are needed; `_analysis_context`
-  also re-queries `aggregate()`/`count()` on an already-evaluated queryset.
-- **A project-wide `retokenize` has never been run for real** on `corpus_db`. A
-  dry-run showed nothing currently needs it, which is not the same as having done
-  it.
+- **`TUFS.csv` (document #20 in `corpus_db`) is the author-survey spreadsheet,
+  uploaded as a document into `DEMO_CORPUS`** on 2026-10-13. It has never been
+  indexed, so the data plane leaves it out, but the Django live-parse views don't
+  gate on status and already count its cells as words in that corpus. It was
+  deliberately left out of the 2026-10-19 rebuild: indexing it would make it
+  `ready` with 5,534 "tokens". Remove it from the corpus (or delete it) first —
+  until then, a stale-only `retokenize` will pick it up.
+- **An edit that bypasses `save()` to text another document already has** —
+  `QuerySet.update()` or raw SQL — makes the next `index_document` violate the
+  `content_hash` unique constraint: the document fails with `worker_error` and the
+  hourly sweep retries it indefinitely. Not reachable through the admin or a
+  `save()` in the shell, which refuse the edit up front.
 - **The Django live-parse views are superseded but still live**, by design — the
   strangler-fig migration never deletes a path until its replacement is confirmed
   to cover it. Retiring them is the other half of the caching phase. Legacy KWIC's
@@ -1033,7 +1052,7 @@ for what the filter carries is `MetadataFilter` in
 ## 10. Testing the data paths
 
 ```bash
-# Django — 256 tests, SQLite, no Postgres needed
+# Django — 266 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 

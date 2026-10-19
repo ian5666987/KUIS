@@ -439,9 +439,15 @@ def _get_selected_documents(request):
     if not ids:
         return Document.objects.none()
 
-    # distinct() keeps a document that sits in several selected corpora from
-    # being counted more than once
-    documents = Document.objects.filter(corpora__id__in=ids).distinct()
+    # A document that sits in several selected corpora must count once.
+    # Matching on membership (id IN ...) rather than joining corpora never
+    # repeats a row, so no .distinct() is needed — Django can only honour that
+    # in count()/aggregate() with a SELECT DISTINCT over every column, the
+    # document text included, just to total a few integers.
+    member_ids = Corpus.documents.through.objects.filter(corpus_id__in=ids).values('document_id')
+    # The text stays out of every query built on this one; the views that
+    # tokenize it ask for it by name (_get_word_lists, _kwic_results).
+    documents = Document.objects.filter(id__in=member_ids).defer('content')
 
     # The secondary metadata filter (docs/data-processing.md). Applied
     # here, not per view, for the same reason the corpus selection is: every
@@ -458,7 +464,7 @@ def _analysis_context(request, documents, feature=None):
     """Context every analysis page needs for the selector bar on top."""
     selected_ids = _resolve_selected_corpus_ids(request)
 
-    totals = documents.aggregate(tokens=Sum('token_count'))
+    totals = documents.aggregate(tokens=Sum('token_count'), documents=Count('id'))
 
     return {
         'corpora': _annotated_corpora(),
@@ -466,7 +472,7 @@ def _analysis_context(request, documents, feature=None):
         'selected_corpora': Corpus.objects.filter(id__in=selected_ids),
         'selected_corpus_count': len(selected_ids),
         'corpus_total': Corpus.objects.count(),
-        'document_count': documents.count(),
+        'document_count': totals['documents'],
         # Shown in the context bar so the size of what's being analysed is
         # always on screen.
         'selection_token_total': totals['tokens'] or 0,
@@ -538,7 +544,7 @@ def _metadata_facet_context(request):
 def _get_word_lists(documents):
     """One word list per document, so collocation/n-gram/KWIC windows never run
     across a document boundary."""
-    return [extract_words(doc.content) for doc in documents]
+    return [extract_words(content) for content in documents.order_by('id').values_list('content', flat=True)]
 
 
 def _require_selection(request):
@@ -686,9 +692,7 @@ def _count_words(documents, size=1):
 def analysis_home(request):
     documents = _get_selected_documents(request)
     context = _analysis_context(request, documents, feature='home')
-
-    totals = documents.aggregate(tokens=Sum('token_count'))
-    context['token_total'] = totals['tokens'] or 0
+    context['token_total'] = context['selection_token_total']
 
     return render(request, 'main/analysis_home.html', context)
 
@@ -892,11 +896,13 @@ def _kwic_results(documents, query, window):
     query_tokens = query.split()
     n = len(query_tokens)
 
-    for doc, words in zip(documents, _get_word_lists(documents)):
+    # Document id order is "corpus order" for the 'center' sort.
+    for title, content in documents.order_by('id').values_list('title', 'content'):
+        words = extract_words(content)
         for i in range(len(words) - n + 1):
             if words[i:i+n] == query_tokens:
                 results.append({
-                    "document": doc.title,
+                    "document": title,
                     "left": words[max(0, i-window):i],
                     "keyword": words[i:i+n],
                     "right": words[i+n:i+n+window]

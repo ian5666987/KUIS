@@ -3,6 +3,7 @@
 from django.db import models, transaction
 from django.contrib.auth.models import User
 
+from .content_hash import compute_content_hash
 from .corpus_parsing import extract_words
 
 # Create your models here.
@@ -68,8 +69,8 @@ class Document(models.Model):
     # what the current Token rows were actually built from (empty while
     # they're being rebuilt) and tokenizer_version which tokenizer built them;
     # worker/tasks/maintenance.py compares both against the content and code
-    # as they are now to find stale tokens. Only uploads and index_document
-    # write content_hash — an admin edit to `content` leaves it as it was.
+    # as they are now to find stale tokens. content_hash always describes
+    # `content` as stored: save() recomputes it whenever it writes `content`.
     content_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenized_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenizer_version = models.IntegerField(null=True, blank=True)
@@ -84,6 +85,20 @@ class Document(models.Model):
 
     def __str__(self):
         return self.title
+
+    def save(self, *, update_fields=None, **kwargs):
+        # content_hash is the upload dedup key (main/document_ingest.py), so it
+        # has to follow every edit to `content` — the Django admin, a ModelForm,
+        # the shell. Left describing the old text, an upload of the old text
+        # would dedup onto the edited document and an upload of the new text
+        # would become a second copy, until a re-index caught up. An edit that
+        # bypasses save() (QuerySet.update(), raw SQL) still leaves it stale
+        # until index_document next runs and recomputes it.
+        if update_fields is None or 'content' in update_fields:
+            self.content_hash = compute_content_hash(self.content)
+            if update_fields is not None:
+                update_fields = {*update_fields, 'content_hash'}
+        super().save(update_fields=update_fields, **kwargs)
 
 class Corpus(models.Model):
     name = models.CharField(max_length=200, unique=True)

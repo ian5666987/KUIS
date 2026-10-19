@@ -5,9 +5,11 @@ main/views.py::_get_selected_documents, which the Django session drove; here
 the selection travels as Next.js URL search params instead (architecture
 plan §6), so this takes corpus_ids directly rather than reading a session.
 
-DISTINCT matters here for the identical reason it does in the Django
-version: a document in two selected corpora must be counted once, not
-twice — see docs/feature-list.md §10 ("Corpus overlap is deduped via .distinct()").
+DISTINCT matters here because a document in two selected corpora must be
+counted once, not twice — see docs/feature-list.md §10 ("Corpus overlap is
+counted once"). It is cheap here because only the id is selected; the Django
+version, which builds a full Document queryset, matches on membership
+(id IN ...) instead.
 
 This is also where the secondary metadata filter is applied
 (docs/data-processing.md). Deliberately HERE and nowhere else: the

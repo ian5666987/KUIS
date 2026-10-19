@@ -180,7 +180,7 @@ npm run dev                     # :3000
 ### Tests
 
 ```bash
-# Django — 256 tests, SQLite, no Postgres needed
+# Django — 266 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 

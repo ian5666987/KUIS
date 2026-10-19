@@ -544,9 +544,10 @@ def _multi_value_facet_q(name, values, include_unset):
     EXISTS rather than a join through the child table, for a concrete reason:
     a join multiplies rows for anyone with two tongues, and
     main/views.py::_analysis_context sums token_count over this same queryset,
-    so a two-tongue document would contribute its tokens twice. The
-    .distinct() in _get_selected_documents dedupes ROWS, not an aggregate over
-    them. EXISTS asks the membership question without touching cardinality.
+    so a two-tongue document would contribute its tokens twice.
+    _get_selected_documents avoids the same problem for corpus overlap by
+    matching on membership; EXISTS is the same move here — it asks the
+    membership question without touching cardinality.
 
     NOT EXISTS is also the complete "(no value)" term on its own: the subquery
     correlates on catalogue_entry__author_id, which is NULL both when the

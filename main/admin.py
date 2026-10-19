@@ -1,10 +1,42 @@
+from django import forms
 from django.contrib import admin
 
 # Register your models here.
+from .content_hash import compute_content_hash
 from .models import Corpus, Document, DocumentErrorFreq, ErrorAnnotation, ErrorTaxonomyNode
 
-# This is apparently how we register a model
-admin.site.register(Document)
+
+class DocumentAdminForm(forms.ModelForm):
+    class Meta:
+        model = Document
+        fields = '__all__'
+
+    def clean_content(self):
+        # Document.save() recomputes content_hash from the edited text, and
+        # content_hash is unique — so text identical to another document's
+        # would otherwise surface as an IntegrityError page on save.
+        content = self.cleaned_data['content']
+        duplicate = (
+            Document.objects.filter(content_hash=compute_content_hash(content))
+            .exclude(pk=self.instance.pk)
+            .only('id', 'title')
+            .first()
+        )
+        if duplicate:
+            raise forms.ValidationError(
+                f'Document #{duplicate.id} ("{duplicate.title}") already has this content.'
+            )
+        return content
+
+
+@admin.register(Document)
+class DocumentAdmin(admin.ModelAdmin):
+    form = DocumentAdminForm
+    # Derived, never typed: content_hash from `content` (Document.save()),
+    # tokenized_hash/tokenizer_version by the indexing task
+    # (worker/tasks/indexing.py). Hand-edited, they would mis-key upload dedup
+    # or hide stale tokens from worker/tasks/maintenance.py.
+    readonly_fields = ('content_hash', 'tokenized_hash', 'tokenizer_version')
 
 
 @admin.register(Corpus)

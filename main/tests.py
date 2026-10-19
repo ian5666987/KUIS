@@ -161,6 +161,54 @@ class SelectionTests(ExplorerTestCase):
 
         self.assertEqual(response.context['document_count'], 2)
 
+    def test_overlapping_corpora_count_each_token_once(self):
+        expected = self.annotated.token_count + self.plain.token_count
+        self.select(self.corpus, self.other)
+
+        frequency = self.client.get(reverse('word_frequency')).context
+        home = self.client.get(reverse('analysis_home')).context
+
+        self.assertEqual(frequency['selection_token_total'], expected)
+        self.assertEqual(frequency['token_total'], expected)  # tokenized from the text, not summed
+        self.assertEqual(home['token_total'], expected)
+
+    def test_pages_that_only_count_never_read_document_text(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self.select(self.corpus, self.other)
+        content_column = connection.ops.quote_name('content')
+
+        for name, params in [('dashboard', {}), ('analysis_home', {}), ('kwic_search', {'word': 'saya'})]:
+            with self.subTest(page=name), CaptureQueriesContext(connection) as queries:
+                self.assertEqual(self.client.get(reverse(name), params).status_code, 200)
+                self.assertFalse([q['sql'] for q in queries if content_column in q['sql']])
+
+    def test_pages_that_tokenize_read_the_text_in_one_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self.select(self.corpus, self.other)
+        content_column = connection.ops.quote_name('content')
+
+        for name, params in [('word_frequency', {}), ('kwic', {'q': 'saya'})]:
+            with self.subTest(page=name), CaptureQueriesContext(connection) as queries:
+                self.client.get(reverse(name), params)
+                self.assertEqual(len([q for q in queries if content_column in q['sql']]), 1)
+
+    def test_concordance_corpus_order_follows_document_ids(self):
+        # Rewriting a row moves it to the end of a Postgres table, so an
+        # unordered scan would now return `plain` before `annotated`.
+        Document.objects.filter(id=self.annotated.id).update(status_detail='')
+        self.select(self.corpus)
+
+        results = self.client.get(reverse('kwic'), {'q': 'saya', 'sort': 'center'}).context['results']
+
+        self.assertEqual(
+            [row['document'] for row in results],
+            ['annotated.xml', 'annotated.xml', 'plain.txt', 'plain.txt'],
+        )
+
 
 class TextAsWrittenTests(ExplorerTestCase):
     def test_counts_the_text_as_written_not_the_correction(self):
@@ -676,6 +724,105 @@ class DocumentIngestTests(TestCase):
         self.assertFalse(created_second)
         self.assertEqual(second.id, first.id)
         self.assertEqual(second.title, 'a.txt')  # dedup hit never renames the existing document
+
+    def test_saving_new_content_rehashes_it(self):
+        from .document_ingest import compute_content_hash
+
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+        self.assertEqual(doc.content_hash, compute_content_hash('saya suka teh'))
+
+        doc.content = 'saya suka kopi'
+        doc.save(update_fields=['content'])  # how an edit names only what it changed
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, compute_content_hash('saya suka kopi'))
+
+        doc.content = 'saya minum kopi'
+        doc.save()  # the admin's full save
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, compute_content_hash('saya minum kopi'))
+
+    def test_saving_other_fields_leaves_the_hash_alone(self):
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+        Document.objects.filter(id=doc.id).update(content_hash='set-elsewhere')
+        doc.refresh_from_db()
+
+        doc.title = 'renamed.txt'
+        doc.save(update_fields=['title'])
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, 'set-elsewhere')
+
+    def test_upload_dedup_follows_an_edit_before_any_reindex(self):
+        """The window between an edit and the re-index that follows it: the
+        old text is no longer on the server, the new text is."""
+        from .document_ingest import get_or_create_document
+
+        edited, _ = get_or_create_document(title='a.txt', content='saya suka teh', user=None)
+        edited.content = 'saya suka kopi'
+        edited.save()
+
+        old_text, created_old = get_or_create_document(title='old.txt', content='saya suka teh', user=None)
+        new_text, created_new = get_or_create_document(title='new.txt', content='saya suka kopi', user=None)
+
+        self.assertTrue(created_old)
+        self.assertNotEqual(old_text.id, edited.id)
+        self.assertFalse(created_new)
+        self.assertEqual(new_text.id, edited.id)
+
+    def test_admin_form_refuses_content_another_document_has(self):
+        from .admin import DocumentAdminForm
+
+        Document.objects.create(title='taken.txt', content='saya suka teh')
+        doc = Document.objects.create(title='t.txt', content='saya suka kopi')
+
+        def form(content):
+            return DocumentAdminForm(
+                data={'title': doc.title, 'content': content, 'token_count': 0, 'status': doc.status},
+                instance=doc,
+            )
+
+        duplicate = form('saya suka teh\r\n')  # differs only in what the hash ignores
+        self.assertFalse(duplicate.is_valid())
+        self.assertIn('taken.txt', duplicate.errors['content'][0])
+
+        self.assertTrue(form('saya suka kopi').is_valid())  # its own content is no conflict
+
+    def test_admin_shows_the_hashes_without_letting_them_be_edited(self):
+        from django.contrib import admin
+        from django.test import RequestFactory
+
+        request = RequestFactory().get('/')
+        request.user = User.objects.create_superuser('admin', password='pw-for-tests-1')
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+
+        fields = admin.site._registry[Document].get_form(request, doc, change=True).base_fields
+        for name in ('content_hash', 'tokenized_hash', 'tokenizer_version'):
+            self.assertNotIn(name, fields)
+        self.assertIn('content', fields)
+
+    def test_admin_edit_moves_the_dedup_key(self):
+        from .document_ingest import compute_content_hash
+
+        self.client.force_login(User.objects.create_superuser('admin', password='pw-for-tests-1'))
+        Document.objects.create(title='taken.txt', content='saya suka susu')
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+        url = reverse('admin:main_document_change', args=[doc.id])
+
+        def post(content):
+            return self.client.post(url, {
+                'title': doc.title, 'content': content, 'user': '', 'token_count': 0,
+                'status': doc.status, 'status_reason': '', 'status_detail': '',
+            })
+
+        self.assertEqual(post('saya suka kopi').status_code, 302)
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, compute_content_hash('saya suka kopi'))
+
+        refused = post('saya suka susu')
+        self.assertEqual(refused.status_code, 200)  # the form again, with the error — not a 500
+        self.assertIn('taken.txt', refused.content.decode())
+        doc.refresh_from_db()
+        self.assertEqual(doc.content, 'saya suka kopi')
 
 
 class WorkerTaskTests(TestCase):
@@ -1535,13 +1682,18 @@ class BackfillContentHashCommandTests(TestCase):
     under the new canonicalized formula for documents hashed (or never
     hashed) under the old one, without touching Token/aggregate rows."""
 
+    @staticmethod
+    def _hashed_under_old_formula(doc, **hashes):
+        """Writes hashes Document.save() would never produce, through
+        QuerySet.update() — which bypasses save(), as rows hashed before the
+        canonicalized formula effectively did."""
+        Document.objects.filter(id=doc.id).update(**hashes)
+
     def test_recomputes_hash_with_new_formula(self):
         from .document_ingest import compute_content_hash
 
-        doc = Document.objects.create(
-            title='t.txt', content='saya suka teh',
-            content_hash='stale-placeholder', tokenized_hash='stale-placeholder',
-        )
+        doc = Document.objects.create(title='t.txt', content='saya suka teh')
+        self._hashed_under_old_formula(doc, content_hash='stale-placeholder', tokenized_hash='stale-placeholder')
 
         call_command('backfill_content_hash', stdout=StringIO())
 
@@ -1561,12 +1713,12 @@ class BackfillContentHashCommandTests(TestCase):
         self.assertIsNone(doc.tokenized_hash)  # never indexed — nothing to keep in lockstep
 
     def test_reports_but_does_not_merge_pre_existing_duplicates(self):
-        first = Document.objects.create(
-            title='dup-a.txt', content='saya suka teh', content_hash='stale-a',
-        )
-        second = Document.objects.create(
-            title='dup-b.txt', content='saya suka teh', content_hash='stale-b',
-        )
+        first = Document.objects.create(title='dup-a.txt', content='saya suka teh')
+        second = Document.objects.create(title='dup-b.txt', content='placeholder')
+        self._hashed_under_old_formula(first, content_hash='stale-a')
+        # Same text as `first` — only possible for rows from before the
+        # unique constraint, which is what this command exists to clean up.
+        self._hashed_under_old_formula(second, content='saya suka teh', content_hash='stale-b')
 
         out = StringIO()
         call_command('backfill_content_hash', stdout=out)
@@ -1606,9 +1758,10 @@ class ProfileApiTests(TestCase):
     def test_profile_reports_own_counts_only(self):
         other = User.objects.create_user('other', password='pw-for-tests-1')
 
+        # Distinct content — content_hash is globally unique.
         Document.objects.create(title='mine.xml', content='saya suka teh', user=self.user)
-        Document.objects.create(title='mine2.xml', content='saya suka teh', user=self.user)
-        Document.objects.create(title='theirs.xml', content='saya suka teh', user=other)
+        Document.objects.create(title='mine2.xml', content='saya suka kopi', user=self.user)
+        Document.objects.create(title='theirs.xml', content='saya suka susu', user=other)
 
         Corpus.objects.create(name='Mine', created_by=self.user)
         Corpus.objects.create(name='Theirs', created_by=other)
@@ -1946,7 +2099,8 @@ def _indexed(title, content):
 
 def _edit_content(doc, content):
     """An edit the way the Django admin (or the shell) makes one: `content`
-    changes, nothing reindexes, and content_hash keeps its old value."""
+    changes and nothing reindexes, so the Token rows — and tokenized_hash —
+    still describe the old text."""
     doc.content = content
     doc.save(update_fields=['content'])
 
@@ -1975,10 +2129,8 @@ class TokenStalenessTests(TestCase):
 
         self.assertEqual(find_stale_documents(), {doc.id: 'untokenized'})
 
-    def test_content_edit_is_caught_although_content_hash_never_changed(self):
-        """The case the plan's `tokenized_hash IS DISTINCT FROM content_hash`
-        would have missed: nothing but an upload or index_document writes
-        content_hash, so after an admin edit the two columns still agree."""
+    def test_content_edit_is_caught(self):
+        from .document_ingest import compute_content_hash
         from worker.tasks.maintenance import find_stale_documents
 
         doc = _indexed('t.txt', PLAIN_TEXT)
@@ -1986,16 +2138,21 @@ class TokenStalenessTests(TestCase):
         _edit_content(doc, 'saya minum kopi')
 
         doc.refresh_from_db()
-        self.assertEqual(doc.content_hash, old_hash)
-        self.assertEqual(doc.tokenized_hash, old_hash)
+        self.assertEqual(doc.content_hash, compute_content_hash('saya minum kopi'))  # dedup key follows
+        self.assertEqual(doc.tokenized_hash, old_hash)  # the tokens don't
         self.assertEqual(find_stale_documents(), {doc.id: 'content_changed'})
 
     def test_content_edit_through_a_queryset_update_is_caught(self):
+        """The case the plan's `tokenized_hash IS DISTINCT FROM content_hash`
+        would have missed: QuerySet.update() bypasses Document.save(), so
+        content_hash isn't recomputed and the two columns still agree."""
         from worker.tasks.maintenance import find_stale_documents
 
         doc = _indexed('t.txt', PLAIN_TEXT)
         Document.objects.filter(id=doc.id).update(content='saya minum kopi')
 
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, doc.tokenized_hash)
         self.assertEqual(find_stale_documents(), {doc.id: 'content_changed'})
 
     def test_canonicalization_only_differences_are_not_a_content_change(self):

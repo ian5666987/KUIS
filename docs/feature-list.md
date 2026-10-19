@@ -318,7 +318,7 @@ main/                          # Django app — back office + both auth surfaces
                          extract_textfile_name, looks_like_structured_xml
   auth_backends.py     — UsernameOrEmailBackend
   forms.py, admin.py, apps.py
-  tests.py             — 256 tests
+  tests.py             — 266 tests
   templatetags/kuis.py — hidden_params / qs / sort_url / aria_sort tags,
                          per_million + bar_width filters (§9)
   static/main/kuis.css — the whole interface: design tokens, then components
@@ -397,8 +397,8 @@ docker/                — django / fastapi / worker Dockerfiles
 **Word Frequency, server-rendered.** `GET /analysis/frequency/` →
 `views.word_frequency` → `_require_selection` (bounces to the hub if nothing is
 selected) → `_get_selected_documents(request)` resolves session corpus ids **and
-the metadata facet params** to a `.distinct()` queryset → `_count_words()` parses
-each document into one word list per document and folds them into a `Counter` →
+the metadata facet params** to a queryset with `content` deferred → `_count_words()`
+fetches the text in one query and parses each document into one word list per document and folds them into a `Counter` →
 `_rank_counter()` applies the filter, sort and pagination shared by all three
 count analyses → renders the template, which includes `context_bar.html` and
 delegates results to `frequency_results.html`. The `/export/` route runs the same
@@ -500,9 +500,12 @@ literal text. Use `{% comment %} … {% endcomment %}`.
   analysis is corpus-scoped — which is exactly why migration `0006` exists.
   `corpus_dashboard` shows an "unassigned files" warning to admins so new orphans
   get noticed.
-- **Corpus overlap is deduped via `.distinct()`.** Without it the M2M join returns
-  a document once per matching corpus and counts it twice. Verified: selecting A∪B
-  where B⊂A yields byte-identical output to selecting A alone.
+- **Corpus overlap is counted once.** `_get_selected_documents` matches documents
+  on corpus membership (`id IN (…)`) rather than joining `corpora`, which would
+  return a document once per matching corpus and count it twice. It used to join
+  and then `.distinct()`, which Django can only honour in `count()`/`aggregate()`
+  with a `SELECT DISTINCT` over every column, the full text included. Verified:
+  selecting A∪B where B⊂A yields byte-identical output to selecting A alone.
 - **Never flatten word lists across documents.** `_get_word_lists` returns *one
   list per document* precisely so collocation/n-gram/KWIC windows don't straddle a
   document boundary and invent pairs that exist in no real text. Any new

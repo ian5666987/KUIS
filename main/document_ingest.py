@@ -1,10 +1,11 @@
 """Content-hash based upload deduplication (docs/data-processing.md).
 
-The single place Document.content_hash is computed — main/views.py,
-main/api_documents.py, main/api_corpus.py and worker/tasks/indexing.py all
-import compute_content_hash/get_or_create_document from here rather than each
-having their own hashlib call, so the formula can never drift into two
-different things that happen to share a name.
+main/views.py, main/api_documents.py, main/api_corpus.py and
+worker/tasks/indexing.py all import compute_content_hash/get_or_create_document
+from here rather than each having their own hashlib call, so the formula can
+never drift into two different things that happen to share a name. The formula
+itself lives in main/content_hash.py, re-exported here, because Document.save()
+needs it too and this module imports the models.
 
 Deliberately a new/neutral module rather than living in main/views.py:
 api_documents.py and api_corpus.py's own docstrings explain they don't import
@@ -14,52 +15,9 @@ none of the three upload-site modules, so all three — and the worker — can
 import it without that concern applying.
 """
 
-import hashlib
-import re
-import xml.etree.ElementTree as ET
-
-from .corpus_parsing import looks_like_structured_xml
+from .content_hash import compute_content_hash
 from .metadata_catalogue import link_catalogue_entry
 from .models import Document
-
-_CRLF_RE = re.compile(r"\r\n?")
-
-
-def canonicalize_for_hash(content):
-    """Normalizes representationally-irrelevant differences before hashing, so
-    two uploads of "the same" document dedup even when their raw bytes differ
-    (BOM presence, CRLF vs LF, leading/trailing whitespace, XML attribute
-    order) — see docs/data-processing.md: these are the ways two exports of
-    the same document routinely vary. Deliberately narrow: internal
-    whitespace, case, and everything else about the text is left untouched,
-    so meaningfully different plain text never collides. Never touches what
-    gets *stored* — Document.content always keeps the exact raw text as
-    uploaded; only the hash input is canonicalized.
-    """
-    if content.startswith("﻿"):
-        content = content[1:]
-    content = _CRLF_RE.sub("\n", content)
-    content = content.strip()
-
-    if looks_like_structured_xml(content):
-        try:
-            return ET.canonicalize(content, strip_text=False)
-        except Exception:
-            # Parses well enough to look like corpus XML (has a <body>) but
-            # not strictly C14N-canonicalizable (e.g. an unbound namespace
-            # prefix) — fall back to the line/BOM-normalized text instead of
-            # failing the upload. Safe failure mode: a missed dedup
-            # opportunity, never a false positive or a crash.
-            return content
-
-    return content
-
-
-def compute_content_hash(content):
-    """The one formula for Document.content_hash — used at upload time (this
-    module) and by worker/tasks/indexing.py's post-index recompute, so a
-    freshly-hashed upload and a freshly-reindexed document always agree."""
-    return hashlib.sha256(canonicalize_for_hash(content).encode("utf-8")).hexdigest()
 
 
 def decode_uploaded_file(uploaded_file):
