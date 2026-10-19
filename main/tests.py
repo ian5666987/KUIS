@@ -1909,6 +1909,251 @@ class RetokenizeDryRunTests(TestCase):
         self.assertIn('(+5)', output)  # 5 original tokens recomputed from a stale 0
         self.assertIn('Dry run only', output)
 
+    def test_dry_run_lists_only_stale_documents_unless_all(self):
+        fresh = _indexed('fresh.xml', CORPUS_XML)
+        edited = _indexed('edited.txt', PLAIN_TEXT)
+        _edit_content(edited, 'saya minum kopi')
+
+        out = StringIO()
+        call_command('retokenize', '--dry-run', stdout=out)
+        self.assertNotIn('fresh.xml', out.getvalue())
+        self.assertIn('edited.txt: 7 -> 3 (-4) [content_changed]', out.getvalue())
+
+        out = StringIO()
+        call_command('retokenize', '--dry-run', '--all', stdout=out)
+        self.assertIn('fresh.xml: 10 -> 10 (+0)', out.getvalue())
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, Document.STATUS_READY)
+
+    def test_dry_run_says_when_a_document_would_fail_again(self):
+        Document.objects.create(
+            title='nobody.xml',
+            content="<document><header><lang>indonesian</lang></header></document>",
+        )
+
+        out = StringIO()
+        call_command('retokenize', '--dry-run', stdout=out)
+
+        self.assertIn('nobody.xml: would fail (xml_no_body) [untokenized]', out.getvalue())
+
+
+def _indexed(title, content):
+    doc = Document.objects.create(title=title, content=content)
+    index_document(doc.id)
+    doc.refresh_from_db()
+    return doc
+
+
+def _edit_content(doc, content):
+    """An edit the way the Django admin (or the shell) makes one: `content`
+    changes, nothing reindexes, and content_hash keeps its old value."""
+    doc.content = content
+    doc.save(update_fields=['content'])
+
+
+class _WorkerKilled(BaseException):
+    """Stands in for the worker process dying mid-task: a BaseException, so
+    index_document's `except Exception` never sees it — exactly as it would
+    never run for a SIGKILL."""
+
+
+class TokenStalenessTests(TestCase):
+    """worker/tasks/maintenance.py — which documents' Token rows no longer
+    match their content or the current tokenizer."""
+
+    def test_freshly_indexed_document_is_not_stale(self):
+        from worker.tasks.maintenance import find_stale_documents
+
+        _indexed('t.xml', CORPUS_XML)
+
+        self.assertEqual(find_stale_documents(), {})
+
+    def test_never_indexed_document_is_untokenized(self):
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
+
+        self.assertEqual(find_stale_documents(), {doc.id: 'untokenized'})
+
+    def test_content_edit_is_caught_although_content_hash_never_changed(self):
+        """The case the plan's `tokenized_hash IS DISTINCT FROM content_hash`
+        would have missed: nothing but an upload or index_document writes
+        content_hash, so after an admin edit the two columns still agree."""
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = _indexed('t.txt', PLAIN_TEXT)
+        old_hash = doc.content_hash
+        _edit_content(doc, 'saya minum kopi')
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.content_hash, old_hash)
+        self.assertEqual(doc.tokenized_hash, old_hash)
+        self.assertEqual(find_stale_documents(), {doc.id: 'content_changed'})
+
+    def test_content_edit_through_a_queryset_update_is_caught(self):
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = _indexed('t.txt', PLAIN_TEXT)
+        Document.objects.filter(id=doc.id).update(content='saya minum kopi')
+
+        self.assertEqual(find_stale_documents(), {doc.id: 'content_changed'})
+
+    def test_canonicalization_only_differences_are_not_a_content_change(self):
+        """Same hash formula as dedup — a CRLF/BOM/trailing-whitespace rewrite
+        tokenizes identically, so it must not trigger a rebuild."""
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = _indexed('t.txt', PLAIN_TEXT)
+        _edit_content(doc, '﻿' + PLAIN_TEXT + '\r\n')
+
+        self.assertEqual(find_stale_documents(), {})
+
+    def test_bumping_the_tokenizer_version_makes_older_documents_outdated(self):
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = _indexed('t.xml', CORPUS_XML)
+
+        with mock.patch('worker.tasks.maintenance.TOKENIZER_VERSION', 2):
+            self.assertEqual(find_stale_documents(), {doc.id: 'tokenizer_outdated'})
+
+    def test_run_killed_midway_leaves_the_document_untokenized(self):
+        """Before index_document cleared tokenized_hash up front, a killed
+        re-index left a document still claiming the hash of a completed run —
+        invisible to any staleness check, and stuck at 'indexing' for good."""
+        from worker.tasks.maintenance import find_stale_documents
+
+        doc = _indexed('t.xml', CORPUS_XML)
+        with mock.patch('worker.tasks.indexing.build_tokens', side_effect=_WorkerKilled):
+            with self.assertRaises(_WorkerKilled):
+                index_document(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.status, Document.STATUS_INDEXING)
+        self.assertIsNone(doc.tokenized_hash)
+        self.assertIsNone(doc.tokenizer_version)
+        # The delete rolled back with the rest of the run: the old rows survive.
+        self.assertEqual(doc.tokens.count(), 10)
+        self.assertEqual(find_stale_documents(), {doc.id: 'untokenized'})
+
+    def test_crash_is_retried_but_a_content_failure_is_not(self):
+        from .document_ingest import compute_content_hash
+        from worker.tasks.maintenance import find_stale_documents
+
+        crashed = _indexed('crashed.xml', CORPUS_XML)
+        with mock.patch('worker.tasks.indexing.build_tokens', side_effect=RuntimeError('db gone')):
+            with self.assertRaises(RuntimeError):
+                index_document(crashed.id)
+
+        broken_content = CORPUS_XML.replace('saya suka', 'saya & suka')
+        broken = _indexed('broken.xml', broken_content)
+
+        crashed.refresh_from_db()
+        self.assertEqual(crashed.status_reason, 'worker_error')
+        # The rollback restored the old rows; a failed document must not keep them.
+        self.assertFalse(crashed.tokens.exists())
+        self.assertEqual(broken.status_reason, 'xml_malformed')
+        self.assertEqual(broken.tokenized_hash, compute_content_hash(broken_content))
+        self.assertEqual(find_stale_documents(), {crashed.id: 'untokenized'})
+
+    def test_fixing_a_failed_document_makes_it_stale(self):
+        from worker.tasks.maintenance import find_stale_documents
+
+        broken = _indexed('broken.xml', CORPUS_XML.replace('saya suka', 'saya & suka'))
+        _edit_content(broken, CORPUS_XML)
+
+        self.assertEqual(find_stale_documents(), {broken.id: 'content_changed'})
+
+    def test_reindex_stale_documents_queues_stale_ones_and_skips_indexing(self):
+        from .document_ingest import compute_content_hash
+        from worker.tasks.maintenance import reindex_stale_documents
+
+        fresh = _indexed('fresh.xml', CORPUS_XML)
+        edited = _indexed('edited.txt', PLAIN_TEXT)
+        _edit_content(edited, 'saya minum kopi')
+        queued = Document.objects.create(title='queued.xml', content=NESTED_CORPUS_XML)
+
+        with mock.patch('worker.tasks.maintenance.index_document.delay', wraps=index_document.delay) as dispatch:
+            result = reindex_stale_documents()
+
+        dispatch.assert_called_once_with(edited.id)
+        self.assertEqual(result, {'queued': {'content_changed': 1}, 'skipped_indexing': 1})
+        edited.refresh_from_db()
+        self.assertEqual(edited.status, Document.STATUS_READY)
+        self.assertEqual(edited.token_count, 3)
+        self.assertEqual(edited.tokenized_hash, compute_content_hash('saya minum kopi'))
+        queued.refresh_from_db()
+        self.assertEqual(queued.status, Document.STATUS_INDEXING)
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, Document.STATUS_READY)
+
+
+class RetokenizeCommandTests(TestCase):
+    """retokenize without --dry-run: rebuilds the stale documents only, unless
+    --all."""
+
+    def _run(self, *args):
+        out = StringIO()
+        with mock.patch(
+            'main.management.commands.retokenize.index_document', wraps=index_document,
+        ) as task:
+            call_command('retokenize', *args, stdout=out)
+        return [c.args[0] for c in task.call_args_list], out.getvalue()
+
+    def test_rebuilds_only_stale_documents_including_ones_left_at_indexing(self):
+        fresh = _indexed('fresh.xml', CORPUS_XML)
+        edited = _indexed('edited.txt', PLAIN_TEXT)
+        _edit_content(edited, 'saya minum kopi')
+        never_indexed = Document.objects.create(title='queued.xml', content=NESTED_CORPUS_XML)
+
+        processed, output = self._run()
+
+        self.assertEqual(processed, [edited.id, never_indexed.id])
+        self.assertIn('2 document(s) to retokenize: 1 content_changed, 1 untokenized.', output)
+        self.assertIn('edited.txt: 3 tokens (ready)', output)
+        self.assertIn('Retokenized 2 document(s).', output)
+        never_indexed.refresh_from_db()
+        self.assertEqual(never_indexed.status, Document.STATUS_READY)
+        self.assertNotIn('fresh.xml', output)
+
+    def test_reports_nothing_to_do(self):
+        _indexed('fresh.xml', CORPUS_XML)
+
+        processed, output = self._run()
+
+        self.assertEqual(processed, [])
+        self.assertIn('Nothing to retokenize', output)
+
+    def test_all_rebuilds_every_document(self):
+        first = _indexed('first.xml', CORPUS_XML)
+        second = _indexed('second.txt', PLAIN_TEXT)
+
+        processed, output = self._run('--all')
+
+        self.assertEqual(processed, [first.id, second.id])
+        self.assertIn('2 document(s) to retokenize.', output)
+
+    def test_carries_on_past_a_crash(self):
+        from .models import build_tokens as real_build_tokens
+
+        first = Document.objects.create(title='first.xml', content=CORPUS_XML)
+        Document.objects.create(title='second.txt', content=PLAIN_TEXT)
+
+        def crash_on_first(document):
+            if document.id == first.id:
+                raise RuntimeError('boom')
+            return real_build_tokens(document)
+
+        with mock.patch('worker.tasks.indexing.build_tokens', side_effect=crash_on_first):
+            _, output = self._run()
+
+        self.assertIn('first.xml: FAILED (worker_error)', output)
+        self.assertIn('second.txt: 7 tokens (ready)', output)
+        self.assertIn('Retokenized 1 of 2 document(s); 1 failed.', output)
+
+    def test_all_and_unindexed_only_are_mutually_exclusive(self):
+        with self.assertRaises(CommandError):
+            call_command('retokenize', '--all', '--unindexed-only', stdout=StringIO())
+
 
 class AccountApiTestCase(TestCase):
     """Shared fixture for main/api_users.py (docs/feature-list.md):

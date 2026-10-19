@@ -65,9 +65,11 @@ class Document(models.Model):
     # content_hash now doubles as the upload-time dedup key (see
     # docs/data-processing.md and main/document_ingest.py) — the unique
     # constraint below enforces it at the DB level. tokenized_hash tracks
-    # what the current Token rows were actually built from; a future
-    # `tokenized_hash IS DISTINCT FROM content_hash` staleness check remains
-    # a separate, still-open item.
+    # what the current Token rows were actually built from (empty while
+    # they're being rebuilt) and tokenizer_version which tokenizer built them;
+    # worker/tasks/maintenance.py compares both against the content and code
+    # as they are now to find stale tokens. Only uploads and index_document
+    # write content_hash — an admin edit to `content` leaves it as it was.
     content_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenized_hash = models.CharField(max_length=64, null=True, blank=True)
     tokenizer_version = models.IntegerField(null=True, blank=True)

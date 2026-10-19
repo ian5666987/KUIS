@@ -7,12 +7,15 @@ rule — the worker is the only writer of Token/aggregate tables, always
 through Django's ORM).
 
 Phase 5: worker/tasks/{indexing,aggregates}.py are real. maintenance.py
-(retokenize-as-a-task, content-hash staleness checks) is still a stub.
+holds the Token staleness check and the reindex_stale_documents task, which
+celery beat dispatches on the schedule at the bottom of this file.
 
-Run locally with: celery -A worker.celery_app worker --loglevel=info
+Run locally with: celery -A worker.celery_app worker --pool=solo --loglevel=info
+and, for the staleness sweep:  celery -A worker.celery_app beat --loglevel=info
 """
 
 import os
+from datetime import timedelta
 
 import django
 
@@ -38,3 +41,20 @@ app.autodiscover_tasks(["worker"])
 if os.environ.get("CELERY_TASK_ALWAYS_EAGER") == "1":
     app.conf.task_always_eager = True
     app.conf.task_eager_propagates = True
+
+# Read only by `celery beat` (the kuis-beat service in docker-compose.yml),
+# which enqueues; the worker runs the sweep. Each sweep re-hashes every
+# document's content — about 1.2 MB of text for the whole corpus today
+# (docs/hosting.md) — so hourly costs little, and is soon enough for an admin
+# edit, or a TOKENIZER_VERSION bump after a deploy, to be picked up.
+# `expires` drops a sweep still waiting when the next one is due: after hours
+# with the worker down it runs one sweep, not one per missed hour, each
+# re-queuing the same documents.
+STALE_SWEEP_INTERVAL_SECONDS = int(os.environ.get("STALE_SWEEP_INTERVAL_SECONDS", "3600"))
+app.conf.beat_schedule = {
+    "reindex-stale-documents": {
+        "task": "worker.tasks.maintenance.reindex_stale_documents",
+        "schedule": timedelta(seconds=STALE_SWEEP_INTERVAL_SECONDS),
+        "options": {"expires": STALE_SWEEP_INTERVAL_SECONDS},
+    },
+}

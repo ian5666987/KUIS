@@ -33,6 +33,10 @@ worker hasn't touched this" — and the reason that default is no longer
 'ready' (see main/models.py). One that reaches tokenized but never gets its
 aggregate_document (lost message, worker killed) stays 'tokenized', equally
 truthfully; `manage.py aggregate_documents` finishes it.
+
+Whether a document's Token rows still match its content and the current
+tokenizer is worker/tasks/maintenance.py's question, answered from the
+tokenized_hash/tokenizer_version index_document writes here.
 """
 
 from django.db import transaction
@@ -51,31 +55,39 @@ from worker.tasks.aggregates import compute_document_ngrams, compute_document_wo
 from worker.tasks.error_annotations import compute_document_error_freq, extract_document_error_annotations
 
 # Bumped whenever main/corpus_parsing.py's tokenization logic changes in a
-# way that would produce different tokens for the same content — nothing
-# reads this for staleness detection yet (that's the follow-up
-# docs/CHANGELOG.md's Phase 5 entry notes as still open), but it's
-# captured now so that follow-up doesn't need a second backfill pass.
+# way that would produce different tokens for the same content. Bumping it is
+# what makes worker/tasks/maintenance.py::find_stale_documents report every
+# document indexed before the change as stale (tokenizer_outdated), so
+# `manage.py retokenize` rebuilds exactly those and nothing else.
 TOKENIZER_VERSION = 1
 
 
-def _mark_failed(document: Document, reason: str, detail: str) -> None:
+def _mark_failed(document: Document, reason: str, detail: str, *, failed_on_hash: str | None = None) -> None:
     """Records WHY a document couldn't be indexed, alongside the token counts
-    the failure leaves behind (zero — the Token rows were deleted at the top of
-    index_document and nothing replaced them). Writing the counts here matters:
-    a document that previously indexed fine and now fails must not keep
-    advertising its old counts next to a Failed badge."""
+    the failure leaves behind (zero — this run deleted the Token rows and
+    nothing replaced them). Writing the counts here matters: a document that
+    previously indexed fine and now fails must not keep advertising its old
+    counts next to a Failed badge.
+
+    failed_on_hash is for a failure that is a verdict on the content itself —
+    malformed XML, no <body>, no words — as opposed to a crash. It is recorded
+    as tokenized_hash, with the tokenizer version, because the outcome for that
+    exact content is now known: re-running gives the same answer until the
+    content or the tokenizer changes, so the staleness check
+    (worker/tasks/maintenance.py) leaves the document alone until one of them
+    does. A crash says nothing about the content and passes nothing, leaving
+    tokenized_hash empty so the check retries it."""
     document.status = Document.STATUS_FAILED
     document.status_reason = reason
     document.status_detail = detail
     document.token_count = 0
-    document.save(
-        update_fields=[
-            "status",
-            "status_reason",
-            "status_detail",
-            "token_count",
-        ]
-    )
+    update_fields = ["status", "status_reason", "status_detail", "token_count"]
+    if failed_on_hash is not None:
+        document.content_hash = failed_on_hash
+        document.tokenized_hash = failed_on_hash
+        document.tokenizer_version = TOKENIZER_VERSION
+        update_fields += ["content_hash", "tokenized_hash", "tokenizer_version"]
+    document.save(update_fields=update_fields)
 
 
 @app.task
@@ -84,71 +96,95 @@ def index_document(document_id: int) -> int:
     document.status = Document.STATUS_INDEXING
     document.status_reason = ""
     document.status_detail = ""
-    document.save(update_fields=["status", "status_reason", "status_detail"])
+    # tokenized_hash/tokenizer_version describe the current Token rows, and
+    # this run is about to replace them — so they're cleared now, in the same
+    # write that marks the document indexing. A run that never finishes (a
+    # killed worker, a dropped connection) then leaves a document the
+    # staleness check reports as untokenized, rather than one still vouching
+    # for rows this run had started to replace.
+    document.tokenized_hash = None
+    document.tokenizer_version = None
+    document.save(update_fields=["status", "status_reason", "status_detail", "tokenized_hash", "tokenizer_version"])
 
     try:
-        # Re-indexing (content edited, or a re-run) must not double up —
-        # delete first, exactly like main/management/commands/retokenize.py
-        # already does for the same reason.
-        Token.objects.filter(document=document).delete()
+        with transaction.atomic():
+            # Row lock held across the whole delete-and-rebuild. Without it,
+            # two runs for the same document (a retokenize alongside the
+            # worker, two sweeps queuing it before either ran) interleave their
+            # deletes and inserts on a multi-process worker and leave every
+            # token doubled; with it, the second waits and then redoes the
+            # work. Re-read under the lock so the content tokenized is the
+            # content as it is now. (SQLite has no row locks, but its
+            # database-level write lock keeps two writers apart anyway.)
+            document = Document.objects.select_for_update().get(id=document_id)
 
-        # Structural check BEFORE tokenizing. main/corpus_parsing.py's
-        # extract_words falls back to flat tokenization for anything it can't
-        # parse as corpus XML, which silently turns a malformed export's own
-        # markup into "words" — a healthy-looking token count over nonsense.
-        # Failing here is what makes that case visible instead.
-        reason, detail = diagnose_content(document.content, document.title)
-        if reason:
-            _mark_failed(document, reason, detail)
-            return document_id
+            # Re-indexing (content edited, or a re-run) must not double up —
+            # delete first.
+            Token.objects.filter(document=document).delete()
 
-        content_hash = compute_content_hash(document.content)
-        token_count = build_tokens(document)
+            content_hash = compute_content_hash(document.content)
 
-        # Parsed cleanly and still produced nothing — e.g. a <body> containing
-        # only whitespace or only empty elements. Not a crash, but not a
-        # usable document either, and a 0-token 'ready' document is precisely
-        # the state this whole status/reason mechanism exists to surface.
-        if token_count == 0:
-            _mark_failed(document, REASON_NO_TOKENS, REASON_MESSAGES[REASON_NO_TOKENS])
-            return document_id
+            # Structural check BEFORE tokenizing. main/corpus_parsing.py's
+            # extract_words falls back to flat tokenization for anything it can't
+            # parse as corpus XML, which silently turns a malformed export's own
+            # markup into "words" — a healthy-looking token count over nonsense.
+            # Failing here is what makes that case visible instead.
+            reason, detail = diagnose_content(document.content, document.title)
+            if reason:
+                _mark_failed(document, reason, detail, failed_on_hash=content_hash)
+                return document_id
 
-        document.token_count = token_count
-        document.content_hash = content_hash
-        # Identical to content_hash right now (tokenization just ran
-        # against this exact content) — kept as a separate field because
-        # the two are meant to diverge later: content_hash tracks the
-        # document's current content, tokenized_hash tracks what the
-        # existing Token rows were actually built from. A future
-        # `tokenized_hash IS DISTINCT FROM content_hash` check (not
-        # implemented yet) is what would detect a document edited without
-        # reindexing — see data-processing.md §4.
-        document.tokenized_hash = content_hash
-        document.tokenizer_version = TOKENIZER_VERSION
-        document.status = Document.STATUS_TOKENIZED
-        document.status_reason = ""
-        document.status_detail = ""
-        document.save(
-            update_fields=[
-                "token_count",
-                "content_hash",
-                "tokenized_hash",
-                "tokenizer_version",
-                "status",
-                "status_reason",
-                "status_detail",
-            ]
-        )
+            token_count = build_tokens(document)
+
+            # Parsed cleanly and still produced nothing — e.g. a <body> containing
+            # only whitespace or only empty elements. Not a crash, but not a
+            # usable document either, and a 0-token 'ready' document is precisely
+            # the state this whole status/reason mechanism exists to surface.
+            if token_count == 0:
+                _mark_failed(
+                    document, REASON_NO_TOKENS, REASON_MESSAGES[REASON_NO_TOKENS], failed_on_hash=content_hash
+                )
+                return document_id
+
+            document.token_count = token_count
+            document.content_hash = content_hash
+            # Identical to content_hash at this moment (tokenization just ran
+            # against this exact content), but the two diverge the moment
+            # `content` is edited anywhere other than an upload: tokenized_hash
+            # keeps saying what the Token rows were built from, which is what
+            # worker/tasks/maintenance.py compares a fresh hash of the content
+            # against.
+            document.tokenized_hash = content_hash
+            document.tokenizer_version = TOKENIZER_VERSION
+            document.status = Document.STATUS_TOKENIZED
+            document.status_reason = ""
+            document.status_detail = ""
+            document.save(
+                update_fields=[
+                    "token_count",
+                    "content_hash",
+                    "tokenized_hash",
+                    "tokenizer_version",
+                    "status",
+                    "status_reason",
+                    "status_detail",
+                ]
+            )
     except Exception as error:
         # Keep the exception's own text: an unexpected failure is the one case
         # where there is no pre-written explanation, and the type/message is
         # what an operator needs to act on. The raise is preserved so Celery
         # still records the task as failed with its traceback.
-        _mark_failed(
-            document,
-            REASON_WORKER_ERROR,
-            f"{REASON_MESSAGES[REASON_WORKER_ERROR]} ({type(error).__name__}: {error})",
-        )
+        with transaction.atomic():
+            # The rollback above put back whatever Token rows the document had
+            # before this run. A failed document holds none, so remove them
+            # here, as the content-failure paths above already have.
+            Token.objects.filter(document_id=document_id).delete()
+            _mark_failed(
+                document,
+                REASON_WORKER_ERROR,
+                f"{REASON_MESSAGES[REASON_WORKER_ERROR]} ({type(error).__name__}: {error})",
+            )
         raise
 
     # Fire-and-forget under a real broker; synchronous under

@@ -189,6 +189,8 @@ POST (any of six upload sites)
        │                                       filterable the moment it exists)
        └─ if CREATED: index_document.delay(doc.id)
             └─ worker/tasks/indexing.py
+                 ├─ clear tokenized_hash / tokenizer_version  (status: indexing)
+                 ├─ lock the Document row; delete its old Token rows
                  ├─ build_tokens()  → WordType rows + Token rows
                  ├─ write token_count
                  ├─ write content_hash / tokenized_hash / tokenizer_version
@@ -240,6 +242,45 @@ back to `tokenized` for the same command to finish.
 **Idempotence.** `index_document` deletes before inserting, so a re-run never
 doubles up; the same is true of the aggregate and annotation tasks. Writes are
 wrapped in `transaction.atomic()` with `bulk_create(batch_size=5000)`.
+**Concurrent** runs for the same document are a different matter: on a
+multi-process worker their deletes and inserts interleave, and two runs used to
+leave every token doubled (verified on Postgres — 106 rows for 53 words, with
+`token_count` still saying 53). `index_document` therefore holds a row lock on
+the `Document` from the delete to the final status write, so a second run waits
+and then redoes the work.
+
+**Stale tokens.** `worker/tasks/maintenance.py::find_stale_documents` reports
+every document whose `Token` rows no longer match the document, for one of three
+reasons:
+
+| Reason | Means |
+|---|---|
+| `untokenized` | `tokenized_hash` is empty: never indexed (no worker picked the upload up), or a run cleared it and never finished, or crashed (`worker_error`) |
+| `tokenizer_outdated` | built by an older `TOKENIZER_VERSION` (`worker/tasks/indexing.py`) than the code now running |
+| `content_changed` | a fresh hash of `content` differs from `tokenized_hash` — edited in the admin, the shell or SQL |
+
+The content check **re-hashes `content`** rather than comparing
+`tokenized_hash` against the `content_hash` column, because only uploads and
+`index_document` write `content_hash`: after an admin edit the two columns
+still agree, so the plain-SQL `tokenized_hash IS DISTINCT FROM content_hash`
+would miss exactly the edit it was meant to catch. Re-hashing means reading
+every document's content, so the scan streams it 100 rows at a time with
+`.iterator()`. A document that failed **on its content** (malformed XML, no
+words) records the hash it failed on, so it is not retried on every sweep, only
+once the content or the tokenizer changes; a crash records nothing and is
+retried.
+
+Two ways to act on it: `python manage.py retokenize` (synchronous; includes
+documents at `indexing`, which is how uploads no worker ever picked up are
+recovered) and the `reindex_stale_documents` Celery task, which queues
+`index_document` for each stale document but **skips** ones at `indexing` — it
+can't tell one still queued from one whose message was lost, and re-queuing an
+in-flight batch would double the backlog. **Celery beat dispatches the task
+hourly** — the `kuis-beat` service in `docker-compose.yml`, schedule in
+`worker/celery_app.py`, interval overridable with `STALE_SWEEP_INTERVAL_SECONDS`.
+A sweep still waiting when the next is due expires unrun, so a worker that was
+down for hours catches up with one sweep, not one per missed hour. Locally the
+sweep runs only if you start `celery -A worker.celery_app beat` yourself.
 
 ### Ordering constraints that bite
 
@@ -261,9 +302,10 @@ wrapped in `transaction.atomic()` with `bulk_create(batch_size=5000)`.
   grabs a message decides whether a document gets its aggregates, leaving some
   documents stuck at `tokenized`.
 - **`Token` rows go stale on content edits.** Nothing re-indexes a document whose
-  `content` is edited afterwards. `tokenized_hash` exists to detect exactly that
-  (`tokenized_hash IS DISTINCT FROM content_hash`) but **that check is not
-  implemented** — run `retokenize` by hand. See §9.
+  `content` is edited afterwards (in the admin, say). The staleness check detects
+  it and the hourly sweep rebuilds it — see "Stale tokens" above — so an edit
+  reaches analysis up to an hour late, and locally not at all unless celery beat
+  is running. `retokenize` does it immediately.
 - **`CELERY_TASK_ALWAYS_EAGER=1` is required by both test suites.** Fixtures call
   the real `index_document.delay(...)`; eager mode runs it in-process with zero
   broker connections. Without it, 16 Django tests and most data plane tests fail.
@@ -966,15 +1008,10 @@ for what the filter carries is `MetadataFilter` in
 
 ### Open defects and gaps
 
-- **No staleness check exists.** `tokenized_hash` and `tokenizer_version` were
-  added precisely so `retokenize` could become
-  `WHERE tokenized_hash IS DISTINCT FROM content_hash OR tokenizer_version < CURRENT`
-  — detecting content edited without reindexing, tokens lost to a half-failed
-  upload, and tokens built by a superseded tokenizer. **That query is not
-  implemented.** `worker/tasks/maintenance.py` doesn't exist; `retokenize` is a
-  management command you run by hand, over everything.
-- **`retokenize` has no `.iterator()`** — it loads every document's full content
-  into RAM at once.
+- **An admin edit leaves `content_hash` — the dedup key — describing the old
+  content** until the document is re-indexed. In that window, an upload of the old
+  text dedups onto the edited document, and an upload of the new text creates a
+  second copy.
 - **No `defer('content')` on analysis querysets** (`_get_selected_documents`), so
   full document text is loaded even where only counts are needed; `_analysis_context`
   also re-queries `aggregate()`/`count()` on an already-evaluated queryset.
@@ -996,11 +1033,11 @@ for what the filter carries is `MetadataFilter` in
 ## 10. Testing the data paths
 
 ```bash
-# Django — 229 tests, SQLite, no Postgres needed
+# Django — 256 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 
-# Data plane — 171 tests, needs a REAL Postgres whose DB_NAME contains "test"
+# Data plane — 181 tests, needs a REAL Postgres whose DB_NAME contains "test"
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python manage.py migrate --noinput
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python -m pytest dataplane/tests -v
 ```

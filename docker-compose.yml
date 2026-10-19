@@ -53,3 +53,16 @@ services:
     env_file: .env
     depends_on: [kuis-postgres, kuis-redis]
     networks: [app-shared]
+
+  # Celery beat — the clock for the Token staleness sweep (schedule in
+  # worker/celery_app.py, task in worker/tasks/maintenance.py). It only
+  # enqueues; kuis-worker does the work. Run exactly one: a second beat sends
+  # every sweep twice.
+  kuis-beat:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    command: ["celery", "-A", "worker.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule"]
+    env_file: .env
+    depends_on: [kuis-redis]
+    networks: [app-shared]

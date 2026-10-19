@@ -130,6 +130,10 @@ uvicorn dataplane.main:app --reload --port 8001          # :8001  FastAPI
 celery -A worker.celery_app worker --pool=solo --loglevel=info   #    worker
 ```
 
+Optionally a fourth, `celery -A worker.celery_app beat --loglevel=info`, for the
+hourly stale-token sweep (`docker-compose.yml` runs it as `kuis-beat`). Without
+it, run `python manage.py retokenize` after editing a document in the admin.
+
 Health checks: `http://127.0.0.1:8000/` · `http://127.0.0.1:8001/health` ·
 `http://127.0.0.1:8001/docs`.
 
@@ -176,11 +180,11 @@ npm run dev                     # :3000
 ### Tests
 
 ```bash
-# Django — 229 tests, SQLite, no Postgres needed
+# Django — 256 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 
-# Data plane — 171 tests, needs a real Postgres whose DB_NAME contains "test"
+# Data plane — 181 tests, needs a real Postgres whose DB_NAME contains "test"
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python manage.py migrate --noinput
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python -m pytest dataplane/tests -v
 
@@ -263,8 +267,6 @@ data plane tests fail. The data plane fixture **refuses a `DB_NAME` without
   `docs/data-processing.md` §7.
 - Phase 8 (caching, retiring the superseded Django live-parse views) is not
   started.
-- `worker/tasks/maintenance.py` doesn't exist — `retokenize` stays a management
-  command, and there is no automatic staleness check.
 - KUIS-FE controls for the `gender`/`mother_tongue` facets are not built; the API
   serves them and the Django surface renders them.
 - `KUIS-FE/README.md`'s phase table is stale (describes dashboard pages as stubs).

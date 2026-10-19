@@ -90,7 +90,9 @@ Postgres (:5432) and Redis (:6379) must be running as services. Terminals 1–3 
 | 4 | `npm run dev` | http://localhost:3000 |
 
 All four are required: terminal 2 serves every analysis page in the frontend, and
-terminal 3 is what turns an uploaded file into searchable data.
+terminal 3 is what turns an uploaded file into searchable data. Optional fifth:
+`celery -A worker.celery_app beat --loglevel=info` re-indexes documents edited in
+the admin, hourly; without it, run `python manage.py retokenize` after an edit.
 
 ---
 

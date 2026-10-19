@@ -20,3 +20,5 @@ media/
 # Redis (local worker dev — dropped into the cwd when redis-server runs
 # without an explicit --dir)
 dump.rdb
+# Celery beat (local runs without --schedule drop its state file in the cwd)
+celerybeat-schedule*

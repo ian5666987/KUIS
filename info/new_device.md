@@ -76,6 +76,7 @@ Key facts that shape everything below:
 | Django | 8000 | `python manage.py runserver` |
 | FastAPI | 8001 | `uvicorn dataplane.main:app --reload --port 8001` |
 | Celery worker | — | `celery -A worker.celery_app worker --loglevel=info` |
+| Celery beat (optional) | — | `celery -A worker.celery_app beat --loglevel=info` — the hourly stale-token sweep |
 | Next.js | 3000 | `npm run dev` (in `KUIS-FE`) |
 
 ---
@@ -331,7 +332,7 @@ database. On a brand-new empty database there is nothing for them to do.
 
 | Command | What it does |
 |---|---|
-| `retokenize [--dry-run]` | Rebuilds every `Token` row from current `Document.content`, and refreshes the Tier-2 aggregates. Run after changing tokenization logic or editing a document's content — token rows are built at upload and do **not** follow later content edits. |
+| `retokenize [--all \| --unindexed-only] [--dry-run]` | Rebuilds the `Token` rows of every document whose tokens are stale — never built, built by an older tokenizer version, or built from content edited since — and refreshes the aggregates. Token rows are built at upload and do **not** follow later content edits; run this after editing a document, or after a tokenizer change (bump `TOKENIZER_VERSION`, or pass `--all`). |
 | `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens. |
 | `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the error-analytics feature (or before the taxonomy was loaded). Does not rebuild tokens. |
 | `backfill_content_hash` | Recomputes `content_hash` with the canonicalized formula. Only relevant to databases predating migration `0010`; reports collision groups rather than merging them. |
@@ -475,8 +476,8 @@ On Windows PowerShell, inline `VAR=value` prefixes don't work — use
 
 ## 12. Alternative: Docker
 
-`docker-compose.yml` brings up all five backend services (`kuis-postgres`,
-`kuis-redis`, `kuis-django`, `kuis-fastapi`, `kuis-worker`). Two things to
+`docker-compose.yml` brings up all six backend services (`kuis-postgres`,
+`kuis-redis`, `kuis-django`, `kuis-fastapi`, `kuis-worker`, `kuis-beat`). Two things to
 know before using it:
 
 - **No service publishes a host port.** The house convention is that a

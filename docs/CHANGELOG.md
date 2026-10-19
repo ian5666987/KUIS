@@ -52,9 +52,10 @@ SSH deploy on `workflow_dispatch`.
 | **7.8** | 2026-10-13 | Author (person-level) metadata + `gender`/`mother_tongue` facets (migration `0015`). Backend and the Django surface; KUIS-FE controls pending |
 | **7.9** | 2026-10-16 | Corrected text mode removed to save space (migration `0017`). Only the text as written is tokenized; the `mode` column is gone from `Token`/`DocumentWordFreq`/`DocumentNgram` along with `Document.token_count_corrected`, roughly halving all three tables. The `corrected` param is dropped from every analysis endpoint and the toggle from both UIs. A segment's correction is still stored and shown via `ErrorAnnotation.correction_text` |
 | **7.10** | 2026-10-19 | `tokenized` document status (migration `0018`). Indexing split into `index_document` (→ `tokenized`) and `aggregate_document` (→ `ready`, all four derived tables plus the status flip in one transaction). The data plane now scopes by status: KWIC accepts `tokenized`/`ready`, every other feature `ready` only. `ready` used to be set before the aggregates were dispatched fire-and-forget, so it guaranteed nothing about them. New `aggregate_documents` repair command; KUIS-FE shows the new state |
+| **7.11** | 2026-10-19 | Token staleness check (`worker/tasks/maintenance.py`). `retokenize` now rebuilds only documents whose tokens are stale — never built, built by an older `TOKENIZER_VERSION`, or built from content since edited (detected by re-hashing `content`, since an admin edit never updates `content_hash`) — with `--all` for the old everything-pass. New `reindex_stale_documents` task, dispatched hourly by a new `kuis-beat` (celery beat) service. `index_document` clears `tokenized_hash` before replacing tokens and holds a row lock across delete-and-rebuild: two concurrent runs for one document used to double its tokens. Scans stream content with `.iterator()` |
 | **8** | — | ⬜ **Not started.** Caching (Tier 4) + retiring the superseded Django live-parse views |
 
-Test-suite growth, for scale: 29 Django tests at Phase 0 → 229 today, plus 170
+Test-suite growth, for scale: 29 Django tests at Phase 0 → 256 today, plus 181
 data plane tests.
 
 ## Notable course corrections
@@ -85,7 +86,7 @@ data plane tests.
   without its original `path: "/api/auth"`, so it silently survived logout.
 - **`worker/tasks/maintenance.py` was designed but never written.** `retokenize`
   stays a management command, now fixed to also refresh Tier-2 aggregates instead
-  of leaving them stale. There is still no automatic staleness check.
+  of leaving them stale. The staleness check arrived later, in 7.11.
 - **The Tier-4 cache key is wider than planned** — the metadata filter (7.7) and
   its author facets (7.8) are additional scoping axes, so any key must cover all
   five facets plus the `__none__` sentinel per facet, or a filtered request will

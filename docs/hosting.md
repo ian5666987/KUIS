@@ -21,6 +21,7 @@ service publishes a host port (`docker-compose.yml`).
 | `kuis-django` | `python:3.14-slim` + gunicorn | Auth/RBAC, users, corpus + file metadata, admin, uploads. |
 | `kuis-fastapi` | `python:3.14-slim` + uvicorn ×4 | Read-only analytics: KWIC, frequency, n-grams, collocations, error analytics. |
 | `kuis-worker` | `python:3.14-slim` + Celery | Tokenization and all Tier-2 aggregate computation. |
+| `kuis-beat` | same image as `kuis-worker` | Celery beat: enqueues the hourly stale-token sweep. Negligible load; exactly one instance. |
 | `kuis-redis` | `redis:7-alpine` | Celery broker only. |
 | KUIS-FE | Next.js 16 / React 19, `next start` | SSR frontend. No Dockerfile in the repo yet. |
 

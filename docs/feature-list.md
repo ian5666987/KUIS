@@ -277,7 +277,7 @@ exercising the tiers against all three surfaces without hand-editing users.
 | `load_error_taxonomy` | Loads the ~90-code taxonomy from `info/error.xml` into `ErrorTaxonomyNode`. Replaces the whole table each run. **Run before uploading documents** — annotations resolve against this table at extraction time |
 | `load_metadata_catalogue [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/*.csv` (1,557 entries from 1,559 rows) into `DocumentMetadata` and links each row to its `Document`. Idempotent; `--relink` re-resolves FKs without reading any CSV |
 | `load_author_metadata [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/authors/*.csv` (235 authors + 226 mother tongues from 437 rows) into `Author`/`AuthorMotherTongue`, linking on `(university, name_code)`. **Exits non-zero when the source data has an error** — by design; run `--dry-run` first and read the report |
-| `retokenize [--dry-run]` | Rebuilds all `Token` rows from current `Document.content` **and** dispatches `aggregate_document` to refresh everything derived from them. Documents reach `ready` once the worker runs it (else finish them with `aggregate_documents`). Run after changing tokenization logic or editing a document's content |
+| `retokenize [--all \| --unindexed-only] [--dry-run]` | Rebuilds `Token` rows for every document whose tokens are **stale** — never built, built by an older `TOKENIZER_VERSION`, or built from content since edited (`worker/tasks/maintenance.py`) — **and** dispatches `aggregate_document` to refresh everything derived from them. Documents reach `ready` once the worker runs it (else finish them with `aggregate_documents`). Run after editing a document's content, or after a tokenizer change with `TOKENIZER_VERSION` bumped; `--all` rebuilds every document regardless |
 | `aggregate_documents` | Finishes every document stuck at `tokenized`: builds all four aggregates in-process and moves it to `ready`, reporting any that still fail. Does not rebuild tokens |
 | `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens or change `status` |
 | `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the taxonomy was loaded. Does not rebuild tokens or change `status` |
@@ -318,7 +318,7 @@ main/                          # Django app — back office + both auth surfaces
                          extract_textfile_name, looks_like_structured_xml
   auth_backends.py     — UsernameOrEmailBackend
   forms.py, admin.py, apps.py
-  tests.py             — 229 tests
+  tests.py             — 256 tests
   templatetags/kuis.py — hidden_params / qs / sort_url / aria_sort tags,
                          per_million + bar_width filters (§9)
   static/main/kuis.css — the whole interface: design tokens, then components
@@ -365,18 +365,22 @@ dataplane/                     # FastAPI — READ-ONLY analysis data plane
                          by all seven analysis routers)
   routers/             — health, whoami, frequency, collocations, ngrams,
                          kwic, error_analytics, taxonomy, metadata
-  tests/               — 171 tests; needs a real Postgres (asyncpg)
+  tests/               — 181 tests; needs a real Postgres (asyncpg)
 
 worker/                        # Celery — the only WRITER of derived tables
   celery_app.py        — django.setup() then Celery(broker=REDIS_URL);
-                         honours CELERY_TASK_ALWAYS_EAGER=1
+                         honours CELERY_TASK_ALWAYS_EAGER=1; holds the
+                         celery beat schedule
   tasks/indexing.py    — index_document: tokenize + hash, then chains the
                          aggregate and error-annotation tasks
   tasks/aggregates.py  — compute_document_word_freq, compute_document_ngrams
   tasks/error_annotations.py — extract_document_error_annotations, which
                          calls compute_document_error_freq itself rather than
                          as a second unordered .delay()
-  (tasks/maintenance.py does not exist — retokenize stays a CLI command)
+  tasks/maintenance.py — find_stale_documents (the Token staleness check)
+                         and reindex_stale_documents, which queues
+                         index_document for each; celery beat
+                         (kuis-beat) dispatches it hourly
 
 metadata/              — metadata_2023.csv, metadata_2024.csv (the file
                          catalogue) + authors/{KUIS,OU,TUFS}.csv (person-level)
