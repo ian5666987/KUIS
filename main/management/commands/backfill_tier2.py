@@ -1,12 +1,12 @@
 from django.core.management.base import BaseCommand
 
 from main.models import Document
-from worker.tasks.aggregates import compute_document_ngrams, compute_document_word_freq
+from worker.tasks.aggregates import compute_document_word_freq
 
 
 class Command(BaseCommand):
     help = (
-        "Computes DocumentWordFreq/DocumentNgram (Tier 2) for documents that "
+        "Computes DocumentWordFreq (Tier 2) for documents that "
         "already have Token/WordType data but no aggregates yet — the "
         "one-off backfill new uploads get automatically (via "
         "worker/tasks/indexing.py::aggregate_document, after "
@@ -41,11 +41,7 @@ class Command(BaseCommand):
 
         for i, document_id in enumerate(document_ids, start=1):
             word_freq_count = compute_document_word_freq(document_id)
-            ngram_count = compute_document_ngrams(document_id)
             document = Document.objects.get(id=document_id)
-            self.stdout.write(
-                f"[{i}/{total}] {document.title}: "
-                f"{word_freq_count} word-freq rows, {ngram_count} n-gram rows"
-            )
+            self.stdout.write(f"[{i}/{total}] {document.title}: {word_freq_count} word-freq rows")
 
         self.stdout.write(self.style.SUCCESS(f"Backfilled Tier-2 aggregates for {total} document(s)."))

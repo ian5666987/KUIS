@@ -1,13 +1,14 @@
 """Ports main/views.py::ngrams onto SQL — n is caller-supplied (validated to
-2-5 by NgramService, matching main/views.py::NGRAM_SIZES). Phase 5: swapped
-onto Tier-2's DocumentNgram (via _aggregate_query.py) instead of Tier-0's
-raw self-join — see frequency_repository.py's docstring for what "swapped"
-means here (nothing above this file changed)."""
+2-5 by NgramService, matching main/views.py::NGRAM_SIZES). Counts windows
+straight from main_token in one statement (_window_ngram_query.py). Phase 5
+had swapped this onto the per-document DocumentNgram table; that table was
+dropped as slower and inexact (docs/hosting.md §3) — and, as with every
+swap here, nothing above this file changed."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import MatchMode, NgramRepository, RankedPage, SortDirection
-from dataplane.repositories.postgres._aggregate_query import compute_ngram_agg_page
+from dataplane.repositories.postgres._window_ngram_query import compute_ngram_window_page
 
 
 class PostgresNgramRepository(NgramRepository):
@@ -25,6 +26,6 @@ class PostgresNgramRepository(NgramRepository):
         limit: int,
         offset: int,
     ) -> RankedPage:
-        return await compute_ngram_agg_page(
+        return await compute_ngram_window_page(
             self._session, document_ids, n, query, match_mode, sort, direction, limit, offset
         )

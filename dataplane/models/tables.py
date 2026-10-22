@@ -18,7 +18,6 @@ introspection (`Model._meta.db_table` / `Field.column`), not guessed:
     Token             -> main_token             (id, document_id, word_type_id, position)
     WordType          -> main_wordtype          (id, form)
     DocumentWordFreq  -> main_documentwordfreq  (id, document_id, word_type_id, count)
-    DocumentNgram     -> main_documentngram     (id, document_id, n, word_type_ids, count)
     Corpus.documents (M2M) -> main_corpus_documents (id, corpus_id, document_id)
 
 CI guard (architecture plan §2's "schema drift" caution): if a Django
@@ -27,7 +26,9 @@ fails loudly instead of these queries silently breaking or misreading data.
 
 Phase 5: `token.word` (varchar) is GONE, replaced by `token.word_type_id`
 (architecture plan §2, Tier 1 — "Token.word_type FK replacing Token.word").
-`word_type`, `document_word_freq`, `document_ngram` (Tier 2) added.
+`word_type`, `document_word_freq` (Tier 2) added. (`document_ngram` was
+mirrored here too until migration 0019 dropped the table — n-grams are now
+counted from `token`, see repositories/postgres/_window_ngram_query.py.)
 
 docs/feature-list.md: `error_taxonomy_node`, `error_annotation`,
 `document_error_freq` added — mirrors main.models.{ErrorTaxonomyNode,
@@ -46,9 +47,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Integer,
-    JSON,
     MetaData,
-    SmallInteger,
     String,
     Table,
     Text,
@@ -119,16 +118,6 @@ document_word_freq = Table(
     Column("id", BigInteger, primary_key=True),
     Column("document_id", BigInteger),
     Column("word_type_id", BigInteger),
-    Column("count", Integer),
-)
-
-document_ngram = Table(
-    "main_documentngram",
-    metadata,
-    Column("id", BigInteger, primary_key=True),
-    Column("document_id", BigInteger),
-    Column("n", SmallInteger),
-    Column("word_type_ids", JSON),
     Column("count", Integer),
 )
 

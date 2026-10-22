@@ -184,11 +184,11 @@ npm run dev                     # :3000
 ### Tests
 
 ```bash
-# Django — 266 tests, SQLite, no Postgres needed
+# Django — 264 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 
-# Data plane — 181 tests, needs a real Postgres whose DB_NAME contains "test"
+# Data plane — 217 tests, needs a real Postgres whose DB_NAME contains "test"
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python manage.py migrate --noinput
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python -m pytest dataplane/tests -v
 

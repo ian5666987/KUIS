@@ -1,6 +1,7 @@
-"""Ports main/views.py::collocations onto SQL — n=2 fixed. Phase 5: swapped
-onto Tier-2's DocumentNgram (via _aggregate_query.py, n=2) instead of
-Tier-0's raw self-join. Delegates to the same query builder
+"""Ports main/views.py::collocations onto SQL — n=2 fixed. Counts adjacent
+pairs straight from main_token (_window_ngram_query.py, n=2); the per-document
+DocumentNgram table it read from Phase 5 on was dropped as slower and inexact
+(docs/hosting.md §3). Delegates to the same query builder
 NgramRepository uses (architecture plan §1), while keeping its own public
 interface — collocations have their own product future (e.g.
 mutual-information scoring) a generic n-gram interface shouldn't carry."""
@@ -8,7 +9,7 @@ mutual-information scoring) a generic n-gram interface shouldn't carry."""
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataplane.repositories.base import CollocationRepository, MatchMode, RankedPage, SortDirection
-from dataplane.repositories.postgres._aggregate_query import compute_ngram_agg_page
+from dataplane.repositories.postgres._window_ngram_query import compute_ngram_window_page
 
 
 class PostgresCollocationRepository(CollocationRepository):
@@ -25,6 +26,6 @@ class PostgresCollocationRepository(CollocationRepository):
         limit: int,
         offset: int,
     ) -> RankedPage:
-        return await compute_ngram_agg_page(
+        return await compute_ngram_window_page(
             self._session, document_ids, 2, query, match_mode, sort, direction, limit, offset
         )

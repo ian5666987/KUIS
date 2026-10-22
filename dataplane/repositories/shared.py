@@ -40,9 +40,13 @@ from dataplane.repositories.base import MetadataFilter
 # Document.status values a feature may read (worker/tasks/indexing.py owns the
 # lifecycle: indexing -> tokenized -> ready). A feature that reads only
 # main_token — KWIC — can use a document as soon as its tokens are complete.
-# Every other feature reads DocumentWordFreq, DocumentNgram, ErrorAnnotation or
+# Frequency and the error features read DocumentWordFreq, ErrorAnnotation or
 # DocumentErrorFreq, which are guaranteed to exist only at 'ready'; admitting a
 # tokenized document there would count it as contributing nothing, silently.
+# N-grams and collocations read only main_token too (since DocumentNgram was
+# dropped) but stay at 'ready' on purpose: they sit beside word frequency in
+# the UI and share its token_total, so all three ranked features should
+# always cover the same documents.
 TOKEN_STATUSES = ("tokenized", "ready")
 READY_STATUSES = ("ready",)
 

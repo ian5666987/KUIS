@@ -19,12 +19,12 @@ A server-side cache pays for itself only when all four of these hold:
 
 | Test | Today (real corpus: 298 docs, 0.04 M words) | Catalogue complete (1,559 docs, 0.19 M) | T1 (≈ 10,000 docs, 1.2 M) |
 | --- | --- | --- | --- |
-| **1. A miss is slow enough for users to notice** (≳ 0.5–1 s) | ✗ The slowest request is **154 ms**; most are under 30 ms | ~ 0.5–0.8 s on n-grams, collocations and KWIC sorts. Under ~0.4 s once the §8 query fixes land | ✓ 1–2 s even after the query fixes; 2–4 s before them |
+| **1. A miss is slow enough for users to notice** (≳ 0.5–1 s) | ✗ The slowest request is **111 ms** (KWIC `sort=left`); most are under 55 ms | ~ 1.8 s on KWIC's non-default sorts; n-gram and collocation pages 0.2–0.4 s since 7.13. Under ~0.4 s throughout once the KWIC sort fix lands | ✓ 1–2 s even after the query fixes; 2–4 s before them |
 | **2. Requests actually repeat** | ~ Unknown. Shared landing views and classroom use would repeat; TanStack Query already serves same-browser repeats for 5 min | same | same |
 | **3. No cheaper fix exists** | ✗ The query fixes (§8) are cheaper and make *first* requests faster too | ✗ same | ~ The query fixes help ~2×, but the cost stays linear |
 | **4. The cost is low** | ✓ One container, ≤ 128 MB, no disk | ✓ | ✓ |
 
-**Today it fails tests 1 and 3.** A cache hit would save at most ~150 ms, on a
+**Today it fails tests 1 and 3.** A cache hit would save at most ~110 ms, on a
 request nobody perceives as slow. Meanwhile it adds:
 
 - a container to deploy;
@@ -33,9 +33,10 @@ request nobody perceives as slow. Meanwhile it adds:
 - about ten tests.
 
 **At catalogue size it is borderline before the query fixes and unjustified
-after them.** Measured: the `lead()` n-gram rewrite (`docs/hosting.md` §3)
-brings the worst ranked page to 0.22–0.38 s. The KWIC sort fix should bring
-`sort=left|right|document` near the default sort's cost (**estimated**).
+after them.** The n-gram fix has shipped (7.13, `docs/hosting.md` §3): it
+measures 0.22–0.38 s for the worst ranked page at that size. The KWIC sort fix
+should bring `sort=left|right|document` near the default sort's cost
+(**estimated**).
 
 **At T1 it is justified.** Even after the query fixes, n-gram pages measure
 1.1–1.9 s. A shared result cache is then the cheapest way to make repeated
@@ -46,9 +47,10 @@ views instant, until the corpus-level rollup in `docs/hosting.md` §8 exists.
 1. **Enforce private corpora on the data plane (§6.1).** This is a security gap,
    independent of caching, and it is the prerequisite for any shared cache
    later.
-2. **Swap the n-gram/collocation read path to `lead()` over `main_token` and drop
-   `DocumentNgram`** (`docs/hosting.md` §3). It is 2–3.7× faster at every size
-   measured, exact, and frees 62% of corpus storage.
+2. ✅ **Done in 7.13:** the n-gram/collocation read path is a `lead()` query
+   over `main_token`, and `DocumentNgram` is dropped (`docs/hosting.md` §3).
+   It measured 2–3.7× faster at every size, exact, and it freed 62% of corpus
+   storage.
 3. **Sort KWIC `left|right|document` in SQL** (§8). This removes the
    10,000-window load.
 4. **Keep this design on file.** Nothing in it goes stale while it waits. It
@@ -108,8 +110,8 @@ n-gram counts, and the full-list sizes in §4, are upper bounds.
 
 | Request | Today (real) | Catalogue | T1 | Final page in Redis |
 | --- | --- | --- | --- | --- |
-| N-grams, n = 3 / n = 5 | 132 / 154 ms | 685 / 756 ms | **3,569 / 4,252 ms** | 2.0–3.0 KB |
-| Collocations | 94 ms | 526 ms | **2,287 ms** | 2.0 KB |
+| N-grams, n = 3 / n = 5 | 44 / 53 ms | 285 / 378 ms † | **1,557 / 1,856 ms** † | 2.0–3.0 KB |
+| Collocations | 37 ms | 217 ms † | **1,284 ms** † | 2.0 KB |
 | KWIC, most common word, `sort=left` | 111 ms | **1,784 ms** | **1,936 ms** | 7.5–8.0 KB |
 | Word frequency, page 1 / page 2 | 25 / 27 ms | 124 / 124 ms | 607 / 628 ms | 1.5–2.0 KB |
 | Word frequency, `q` filter | 27 ms | 90 ms | 406 ms | 2.0 KB |
@@ -123,17 +125,20 @@ n-gram counts, and the full-list sizes in §4, are upper bounds.
 | `resolve_document_ids` alone | 1.0 ms | 2.2 ms | 12.8 ms | — (not cached; runs on every request) |
 | **A cache hit** | **≈ 1.2 ms** | **≈ 2.5 ms** | **≈ 13 ms** | lookup + one Redis `GET` (0.10–0.31 ms) |
 
-At today's size a hit saves 4–150 ms per request. That's the number behind
+† The 7.13 `lead()` query, measured before it shipped, without the Service's
+document-id lookup. Before 7.13 these rows were 685 / 756 ms and 3,569 /
+4,252 ms (n-grams) and 526 / 2,287 ms (collocations).
+
+At today's size a hit saves 4–110 ms per request. That's the number behind
 §1's "not justified".
 
 Four paths account for nearly all of the cost at larger sizes, and each is
 slow for a specific, fixable reason:
 
-- **N-grams and collocations.** `compute_ngram_agg_page`
-  (`_aggregate_query.py`) sums every candidate n-gram across the selected
-  documents. It then pulls all of them into Python (35k rows today, 188k at
-  catalogue size, 1.1 M at T1), resolves ids to words, and filters, sorts and
-  slices in Python on every page. Fix: `docs/hosting.md` §3.
+- **N-grams and collocations.** Fixed in 7.13, and still the costliest at scale.
+  The old path pulled every candidate n-gram into Python (1.1 M rows at T1) and
+  sorted it there. The `lead()` query sorts in SQL and returns only the page,
+  but it still reads every token in the selection.
 - **KWIC `sort=left|right|document`.** `PostgresKWICRepository.search` fetches up
   to `MAX_UNPAGINATED_MATCHES` (10,000) matches, loads every one's context
   window in one large `OR` query, sorts in Python, then slices.
@@ -182,7 +187,7 @@ corpus. This is the design.
 | **B.** In-memory LRU in each uvicorn worker | ×4 copies | 0 | none | ~¼ of repeats (requests round-robin across 4 workers) | still needs a shared invalidation signal; memory sits inside the API processes |
 | **C.** Redis, final page | 64–128 MB cap | 0 | one small container | any exact repeat, across users and sessions | a new page, sort or filter is still a miss; data can be stale up to the TTL if a generation bump is lost (§6.5) |
 | **D.** Redis, full ranked list | 0.5–1 GB+ at T1 (**estimated**) | 0 | same as C | page, sort and filter changes too | §4: entries too large to beat recomputing at T1, and worse beyond |
-| **E.** Fix the slow queries | 0 (the n-gram fix *frees* 62% of corpus storage) | − | none | first requests too | engineering time; repeats still cost full price |
+| **E.** Fix the slow queries | 0 (the n-gram fix, shipped in 7.13, *freed* 62% of corpus storage) | − | none | first requests too | engineering time; repeats still cost full price |
 
 **The decision:**
 
@@ -422,13 +427,13 @@ are **estimated**; §6.9's logs are how to check them. For scale, 128 MB is abou
 
 None of this needs a cache, and all of it helps the first request:
 
-1. **N-grams and collocations: compute from `main_token` with `lead()` and drop
-   `DocumentNgram`.**
+1. ✅ **Done in 7.13: n-grams and collocations are computed from `main_token`
+   with `lead()`, and `DocumentNgram` is dropped.**
    - Measured in full in `docs/hosting.md` §3: 39–58 ms against 134–176 ms today,
      217–378 ms against 536–762 ms at catalogue size, and 1.3–1.9 s against
      2.3–4.2 s at T1.
-   - The counts become exact, where the table undercounts long documents.
-   - It frees 62% of corpus storage.
+   - The counts are exact; the table undercounted long documents.
+   - It freed 62% of corpus storage.
 2. **KWIC `sort=left|right`: get the sort key in SQL.**
    - Join the token at `position - 1` (or `position + n`) to get the adjacent
      word, order by it, and paginate in SQL.
@@ -480,12 +485,8 @@ These are linear-cost improvements of ~2×. The corpus-level rollup in
 
 1. **Agree to defer the cache** and adopt the §1.3 triggers, or build it anyway
    for the expected growth.
-2. **Approve dropping `DocumentNgram`** in favour of `lead()` (`docs/hosting.md`
-   §3). That means a migration, the worker no longer writing n-grams, the
-   n-gram/collocation repositories swapped onto a new query builder, and
-   `test_tier_swap_consistency.py` re-pointed at exact counts.
-3. **When it is built: a separate `kuis-cache` or the shared `kuis-redis`** with
+2. **When it is built: a separate `kuis-cache` or the shared `kuis-redis`** with
    `volatile-lru`. This plan recommends separate (§6.6).
-4. **Legacy KWIC retirement**, the other half of Phase 8. Per
+3. **Legacy KWIC retirement**, the other half of Phase 8. Per
    `docs/data-processing.md` §9 it needs a product confirmation, independent of
    anything here.

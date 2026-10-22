@@ -103,12 +103,25 @@ require retokenizing anything.
 ### Tier 2 — the precomputed aggregates
 
 - **`DocumentWordFreq`** — `(document, word_type, count)`.
-- **`DocumentNgram`** — `(document, n, word_type_ids, count)`.
-  `word_type_ids` is a plain **`JSONField`** holding an ordered `list[int]`, not an
-  `ArrayField` — `ArrayField` is Postgres-only and the Django test suite
-  deliberately runs on SQLite.
 
-**Both aggregates are per-document grain.** That is the load-bearing property of
+**N-grams and collocations have no table.** They are counted straight from
+`Token` at query time, in one statement:
+`lead(form, i) OVER (PARTITION BY document_id ORDER BY position)`, then
+`GROUP BY`, then filter, sort and page in SQL
+(`dataplane/repositories/postgres/_window_ngram_query.py`). They used to read a
+per-document `DocumentNgram` table holding the top 500 n-grams per
+`(document, n)`. Migration `0019_drop_document_ngram` removed it, because it
+measured:
+
+- **slower** than the window query at every corpus size;
+- **inexact** for documents with more than 500 distinct n-grams;
+- **62% of all corpus storage.** 96.9% of its rows had `count = 1`, because
+  n-grams in short essays repeat across documents, not within one.
+
+The measurements are in `docs/hosting.md` §3.
+
+**The aggregate is per-document grain, and so is the window query** (the
+`PARTITION BY` keeps every window inside one document). That is the load-bearing property of
 the whole read path: narrowing the document id list — a corpus selection, a
 metadata filter, anything — just sums over fewer rows. It needed no query rework
 anywhere, and an empty id list is already every query builder's "nothing to
@@ -205,7 +218,6 @@ POST (any of six upload sites)
                  └─ aggregate_document.delay(doc.id)
                       └─ ONE transaction, in this order:
                            compute_document_word_freq          (DocumentWordFreq)
-                           compute_document_ngrams             (DocumentNgram)
                            extract_document_error_annotations  (ErrorAnnotation)
                            compute_document_error_freq         (DocumentErrorFreq)
                            status: tokenized → ready
@@ -220,7 +232,7 @@ reads:
 |---|---|---|---|
 | `indexing` | none yet (or a re-index's stale ones) | — | — |
 | `tokenized` | `Token` | ✅ | — |
-| `ready` | `Token` + all four aggregates | ✅ | ✅ |
+| `ready` | `Token` + all three aggregates | ✅ | ✅ |
 | `failed` | none (tokens deleted) | — | — |
 
 `ready` is a promise that **every** derived table exists, error annotations
@@ -391,8 +403,8 @@ never merges them).
 | Feature | Server-rendered Django | FastAPI data plane |
 |---|---|---|
 | Word frequency | **re-parses `Document.content` live** | sums `DocumentWordFreq` |
-| Collocations | **re-parses live** | sums `DocumentNgram` (n=2) |
-| N-grams | **re-parses live** | sums `DocumentNgram` |
+| Collocations | **re-parses live** | `lead()` window query over `Token` (n=2) |
+| N-grams | **re-parses live** | `lead()` window query over `Token` |
 | KWIC (legacy) | **re-parses live** | `Token` self-join |
 | KWIC (fast) | `Token` scan | the same `Token` self-join |
 | Error analytics | — (not built here) | `ErrorAnnotation` / `DocumentErrorFreq` |
@@ -421,10 +433,18 @@ keep in step.**
 
 ### Shared query builders (data plane)
 
-`repositories/postgres/` holds `_ranked_query`, `_aggregate_query`,
-`_ranked_pagination` and `_error_query`. Frequency, collocations and n-grams are
-one shared builder at different values of `n`; the ranked-table controls
-(filter mode, sort, direction, pagination) are expressed once.
+`repositories/postgres/` holds:
+
+- `_aggregate_query`: word frequency over `DocumentWordFreq`.
+- `_window_ngram_query`: n-grams and collocations, `lead()` over `Token`, in one
+  statement.
+- `_error_query`: error frequency.
+- `_ranked_query`: the original n-way self-join, kept as the reference
+  implementation that `test_tier_swap_consistency.py` checks both production
+  paths against.
+
+The ranked-table controls (filter mode, sort with its tie-break, direction) are
+expressed once, in `_ranked_pagination`, and shared by all of them.
 
 ### KWIC's deliberate compromise
 
@@ -995,7 +1015,7 @@ The original plan ran in five tiers. Four are done:
 |---|---|---|
 | **0** — one source of truth | Move the live-parse features onto indexed data instead of re-parsing | ✅ on the data plane (every feature reads tables). The Django views still re-parse and are scheduled to retire |
 | **1** — normalise the vocabulary | `WordType` + `Token.word_type` FK replacing the `varchar` | ✅ shipped (§2) |
-| **2** — precompute aggregates | `DocumentWordFreq`, `DocumentNgram` | ✅ shipped (§2) |
+| **2** — precompute aggregates | `DocumentWordFreq` (and `DocumentNgram`, dropped in `0019` as slower than computing from `Token`) | ✅ shipped (§2) |
 | **3** — indexing out of the request | `transaction.atomic`, `bulk_create(batch_size=5000)`, a task queue, a `status` field, no `post_save` signal | ✅ shipped (§3) |
 | **4** — caching | Redis-backed cache at the service layer | ⬜ **not started** |
 
@@ -1027,19 +1047,11 @@ The full plan, with measured costs, entry sizes and the resource impact, is in
 `docs/caching-plan.md`. It proposes keying on the **resolved document IDs**
 rather than on the filter fields, which covers every facet by construction.
 Measured on the real corpus (298 documents), the cache is **not justified yet**:
-the slowest data plane request takes 154 ms. The doc gives the triggers for
+the slowest data plane request takes 111 ms (KWIC `sort=left`). The doc gives the triggers for
 building it, and the query fixes to do first.
 
 ### Open defects and gaps
 
-- **`DocumentNgram` undercounts long documents.** `TOP_K_PER_DOCUMENT = 500`
-  (`worker/tasks/aggregates.py`) keeps only the top 500 n-grams of each size per
-  document. Any document with more distinct n-grams than that loses the rest,
-  ties broken arbitrarily. On the real corpus that is 3 essays, costing 0.14–0.77%
-  of all occurrences, and `type_count` reads 21,644 bigrams instead of 21,684.
-  `test_tier_swap_consistency.py` doesn't catch it because its fixtures are short.
-  `docs/hosting.md` §3 recommends replacing the table with an exact `lead()`
-  query over `main_token`.
 - **The data plane does not enforce private corpora.** No FastAPI endpoint
   checks `Corpus.is_public`, and `resolve_document_ids` never reads it, so any
   logged-in user can run every analysis on a private corpus by passing its ID.
@@ -1074,11 +1086,11 @@ building it, and the query fixes to do first.
 ## 10. Testing the data paths
 
 ```bash
-# Django — 266 tests, SQLite, no Postgres needed
+# Django — 264 tests, SQLite, no Postgres needed
 CELERY_TASK_ALWAYS_EAGER=1 DB_ENGINE=django.db.backends.sqlite3 DB_NAME=":memory:" \
   python manage.py test main
 
-# Data plane — 181 tests, needs a REAL Postgres whose DB_NAME contains "test"
+# Data plane — 217 tests, needs a REAL Postgres whose DB_NAME contains "test"
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python manage.py migrate --noinput
 CELERY_TASK_ALWAYS_EAGER=1 DB_NAME=kuis_dataplane_test python -m pytest dataplane/tests -v
 ```

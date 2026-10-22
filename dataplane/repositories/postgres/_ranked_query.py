@@ -21,13 +21,14 @@ Ports main/views.py::_count_words + _rank_counter onto SQL:
     filtered/ordered/paginated SELECT over that grouped result.
 
 Ships as a self-join over Token — this WAS the Tier-0 production shape
-until Phase 5's WordType/DocumentWordFreq/DocumentNgram tables landed and
-the three concrete repositories swapped their internals onto
-_aggregate_query.py instead. Kept alive (not deleted) as a correctness
-cross-check: dataplane/tests/test_tier_swap_consistency.py asserts Tier 0
-and Tier 2 produce IDENTICAL RankedPages for the same query, on the theory
-that the swap should be invisible in output, not just in the Service/
-Router/Next.js layers plan §1 already promised were untouched.
+until Phase 5. Word frequency now reads DocumentWordFreq
+(_aggregate_query.py); n-grams and collocations count windows from Token
+with lead() (_window_ngram_query.py). Kept alive (not deleted) as the
+correctness oracle for both: dataplane/tests/test_tier_swap_consistency.py
+asserts this and each production path produce IDENTICAL RankedPages for
+the same query, on the theory that a swap should be invisible in output,
+not just in the Service/Router/Next.js layers plan §1 already promised
+were untouched.
 
 Phase 5 update: joins WordType for the word string, since Token.word_type
 FK replaced Token.word (architecture plan §2, Tier 1) — the self-join

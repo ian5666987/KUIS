@@ -278,8 +278,8 @@ exercising the tiers against all three surfaces without hand-editing users.
 | `load_metadata_catalogue [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/*.csv` (1,557 entries from 1,559 rows) into `DocumentMetadata` and links each row to its `Document`. Idempotent; `--relink` re-resolves FKs without reading any CSV |
 | `load_author_metadata [--file X.csv] [--dry-run] [--relink]` | Loads/upserts `metadata/authors/*.csv` (235 authors + 226 mother tongues from 437 rows) into `Author`/`AuthorMotherTongue`, linking on `(university, name_code)`. **Exits non-zero when the source data has an error** — by design; run `--dry-run` first and read the report |
 | `retokenize [--all \| --unindexed-only] [--dry-run]` | Rebuilds `Token` rows for every document whose tokens are **stale** — never built, built by an older `TOKENIZER_VERSION`, or built from content since edited (`worker/tasks/maintenance.py`) — **and** dispatches `aggregate_document` to refresh everything derived from them. Documents reach `ready` once the worker runs it (else finish them with `aggregate_documents`). Run after editing a document's content, or after a tokenizer change with `TOKENIZER_VERSION` bumped; `--all` rebuilds every document regardless |
-| `aggregate_documents` | Finishes every document stuck at `tokenized`: builds all four aggregates in-process and moves it to `ready`, reporting any that still fail. Does not rebuild tokens |
-| `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens or change `status` |
+| `aggregate_documents` | Finishes every document stuck at `tokenized`: builds all three aggregates in-process and moves it to `ready`, reporting any that still fail. Does not rebuild tokens |
+| `backfill_tier2 [--all]` | Computes `DocumentWordFreq` for documents that have tokens but no aggregates. Does not rebuild tokens or change `status` |
 | `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the taxonomy was loaded. Does not rebuild tokens or change `status` |
 | `backfill_content_hash` | Recomputes `content_hash` with the canonicalized formula. Only relevant to databases predating migration `0010`; reports collision groups rather than merging them |
 
@@ -295,7 +295,7 @@ config/
 
 main/                          # Django app — back office + both auth surfaces
   models.py            — Document, Corpus, WordType, Token, DocumentWordFreq,
-                         DocumentNgram, ErrorTaxonomyNode, ErrorAnnotation,
+                         ErrorTaxonomyNode, ErrorAnnotation,
                          DocumentErrorFreq, UserProfile, DocumentMetadata,
                          Author, AuthorMotherTongue; build_tokens()
   views.py             — every server-rendered view
@@ -318,7 +318,7 @@ main/                          # Django app — back office + both auth surfaces
                          extract_textfile_name, looks_like_structured_xml
   auth_backends.py     — UsernameOrEmailBackend
   forms.py, admin.py, apps.py
-  tests.py             — 266 tests
+  tests.py             — 264 tests
   templatetags/kuis.py — hidden_params / qs / sort_url / aria_sort tags,
                          per_million + bar_width filters (§9)
   static/main/kuis.css — the whole interface: design tokens, then components
@@ -357,15 +357,18 @@ dataplane/                     # FastAPI — READ-ONLY analysis data plane
                          selection and the metadata filter become an id list
   repositories/postgres/ — frequency, collocation, ngram, kwic,
                          error_analytics, taxonomy, metadata repositories +
-                         the shared builders _ranked_query, _aggregate_query,
-                         _ranked_pagination, _error_query
+                         the shared builders _aggregate_query (word freq),
+                         _window_ngram_query (n-grams, collocations),
+                         _error_query, _ranked_pagination, and _ranked_query
+                         (the self-join reference the others are tested
+                         against)
   services/            — one per feature + pagination.py
   schemas/             — response models, plus metadata.py (the one shared
                          *request* schema: MetadataFilterParams, Depends()-ed
                          by all seven analysis routers)
   routers/             — health, whoami, frequency, collocations, ngrams,
                          kwic, error_analytics, taxonomy, metadata
-  tests/               — 181 tests; needs a real Postgres (asyncpg)
+  tests/               — 217 tests; needs a real Postgres (asyncpg)
 
 worker/                        # Celery — the only WRITER of derived tables
   celery_app.py        — django.setup() then Celery(broker=REDIS_URL);
@@ -373,7 +376,8 @@ worker/                        # Celery — the only WRITER of derived tables
                          celery beat schedule
   tasks/indexing.py    — index_document: tokenize + hash, then chains the
                          aggregate and error-annotation tasks
-  tasks/aggregates.py  — compute_document_word_freq, compute_document_ngrams
+  tasks/aggregates.py  — compute_document_word_freq (n-grams have no aggregate;
+                         the data plane counts them from Token)
   tasks/error_annotations.py — extract_document_error_annotations, which
                          calls compute_document_error_freq itself rather than
                          as a second unordered .delay()

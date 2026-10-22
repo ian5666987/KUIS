@@ -43,8 +43,8 @@ class Document(models.Model):
     #
     # Lifecycle: indexing -> tokenized -> ready, or failed.
     #   tokenized — Token/WordType rows are complete; the aggregates
-    #               (DocumentWordFreq, DocumentNgram, ErrorAnnotation,
-    #               DocumentErrorFreq) are still being built, or failed to be.
+    #               (DocumentWordFreq, ErrorAnnotation, DocumentErrorFreq)
+    #               are still being built, or failed to be.
     #   ready     — all of the above exist, written in one transaction.
     # This is NOT display-only: dataplane/repositories/shared.py::
     # resolve_document_ids scopes every analysis by it — KWIC (which reads
@@ -179,37 +179,6 @@ class DocumentWordFreq(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['document', 'word_type'], name='uniq_doc_wordfreq'),
-        ]
-
-
-class DocumentNgram(models.Model):
-    """Precomputed per-document n-gram counts — TOP-K per (document, n)
-    with a frequency floor, not every n-gram (architecture plan §2,
-    Tier 2: "Storing all 5-grams is storing the corpus again at 5x
-    multiplicity, and the tail is never read"). The worker task
-    (worker/tasks/aggregates.py) decides K and the floor, not this schema —
-    see TOP_K_PER_DOCUMENT / FREQUENCY_FLOOR there.
-
-    Simplification vs. the architecture plan's original design: the plan
-    described a separate `Ngram` dimension table keyed by an ArrayField of
-    word_type ids, deduping the n-gram's identity across documents.
-    ArrayField is Postgres-only, and this project's Django test suite (and
-    CI's `django-tests` job) deliberately runs against SQLite for speed —
-    see docs/data-processing.md §2 / CI. Storing `word_type_ids` as a plain
-    cross-database JSONField directly on this table avoids that hard
-    dependency, at the cost of repeating the same id sequence once per
-    document instead of once globally — a fine trade at the corpus sizes
-    this project actually has today, and revisitable if scale ever
-    justifies the extra table."""
-
-    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='ngram_freqs')
-    n = models.SmallIntegerField()
-    word_type_ids = models.JSONField()  # ordered list[int], e.g. [12, 45, 7]
-    count = models.IntegerField()
-
-    class Meta:
-        indexes = [
-            models.Index(fields=['document', 'n']),
         ]
 
 

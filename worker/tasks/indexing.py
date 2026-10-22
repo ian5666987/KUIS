@@ -20,9 +20,9 @@ because aggregate_document is queued BEHIND every index_document already in
 the queue, a batch upload becomes searchable in KWIC file by file, without
 waiting on the whole batch's aggregates.
 
-`ready` means every derived table exists: DocumentWordFreq, DocumentNgram,
-ErrorAnnotation and DocumentErrorFreq, built by one task in one transaction
-together with the status flip — never a document with n-grams but no word
+`ready` means every derived table exists: DocumentWordFreq, ErrorAnnotation
+and DocumentErrorFreq, built by one task in one transaction together with the
+status flip — never a document with error annotations but no word
 frequencies, and never a `ready` badge in front of aggregates still being
 written.
 
@@ -51,7 +51,7 @@ from main.corpus_parsing import (
 from main.document_ingest import compute_content_hash
 from main.models import Document, Token, build_tokens
 from worker.celery_app import app
-from worker.tasks.aggregates import compute_document_ngrams, compute_document_word_freq
+from worker.tasks.aggregates import compute_document_word_freq
 from worker.tasks.error_annotations import compute_document_error_freq, extract_document_error_annotations
 
 # Bumped whenever main/corpus_parsing.py's tokenization logic changes in a
@@ -202,7 +202,7 @@ def aggregate_document(document_id: int) -> int:
     transaction, so a reader sees either the previous state or the finished
     one.
 
-    The four builders run in a fixed order, as plain function calls rather than
+    The three builders run in a fixed order, as plain function calls rather than
     separate .delay()s: two unordered .delay() calls give no guarantee the
     error annotations exist before compute_document_error_freq reads them, and
     separately dispatched tasks have no single point at which "all of them
@@ -219,7 +219,6 @@ def aggregate_document(document_id: int) -> int:
     try:
         with transaction.atomic():
             compute_document_word_freq(document_id)
-            compute_document_ngrams(document_id)
             extract_document_error_annotations(document_id)
             compute_document_error_freq(document_id)
 

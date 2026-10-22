@@ -77,7 +77,7 @@ The worker writes, per source word:
 | --- | --- | --- |
 | `main_token` | **1.00** | one row per word, as written (the corrected stream was removed in `0017`) |
 | `main_documentwordfreq` | **0.53** | complete per-document type counts. Real learners repeat words within an essay; the Zipfian synthetic text gives 0.73 |
-| `main_documentngram` | **3.73** | n = 2,3,4,5, `TOP_K_PER_DOCUMENT=500`, `FREQUENCY_FLOOR=1` |
+| ~~`main_documentngram`~~ | ~~3.73~~ | **dropped in `0019` (7.13)**; n-grams are counted from `main_token` at query time (§3) |
 | `main_errorannotation` | 0.126 | one per `<segment>` |
 
 ### Workload
@@ -93,7 +93,9 @@ The worker writes, per source word:
 
 ## 3. Measured storage, at today's corpus
 
-The real corpus, all derived tables populated, after `VACUUM ANALYZE`:
+The real corpus, all derived tables populated, after `VACUUM ANALYZE`. This was
+measured just before migration `0019` dropped `main_documentngram`. After it, the
+same corpus measures **20.7 MB** in total.
 
 | Table | Rows | Heap | Indexes | Total | Bytes/row |
 | --- | --- | --- | --- | --- | --- |
@@ -116,15 +118,20 @@ The synthetic runs give **167 MB** at catalogue size (1,559 documents,
 
 Two constants fall out of this, and they drive every tier:
 
-- **~0.82 KB of Postgres per source word**, plus ~10 MB fixed. The real corpus
-  and the synthetic runs agree on this to two significant figures.
-- **~105 KB of Postgres per document** (at the 127-word mean).
+- **~0.3 KB of Postgres per source word**, plus ~10 MB fixed. With the n-gram
+  table it was ~0.82 KB, a figure the real corpus and the synthetic runs agreed
+  on to two significant figures.
+- **~35 KB of Postgres per document** (at the 127-word mean).
 
-That is a ~**130×** blow-up over the raw text. `main_documentngram` alone is
-**62%** of the corpus data. Before `0017` the catalogue-size synthetic corpus
-measured 350 MB, about 1.9 KB per word.
+That is a ~**45×** blow-up over the raw text. It was ~130× with the n-gram
+table, which alone was **62%** of the corpus data. Before `0017` the
+catalogue-size synthetic corpus measured 350 MB, about 1.9 KB per word.
 
-### The per-document n-gram table: keep it, raise the floor, or drop it?
+### The per-document n-gram table — dropped (7.13)
+
+Decided on 2026-10-22 and shipped as migration `0019_drop_document_ngram`. The
+analysis that decided it is kept below, because it is the evidence behind the
+change.
 
 **Why it is so large.** With `FREQUENCY_FLOOR = 1` and a 127-word essay, almost
 every n-gram occurs once in its document, so the table stores ~3.7 rows per
@@ -151,14 +158,14 @@ A floor of 2 isn't a smaller version of the same feature. It is a different
 feature that returns wrong counts.
 
 **Option 2: drop the table and compute n-grams from `main_token`.
-Recommended.** A single-scan query does it:
+Chosen.** A single-scan query does it:
 `lead(form, i) OVER (PARTITION BY document_id ORDER BY position)`, then
 `GROUP BY`, `ORDER BY count`, `LIMIT` in SQL. Only the page's 50 rows come
 back, and `type_count`/`result_count` come from window counts in the same
 statement.
 
-Timed end to end through asyncpg against the current read path
-(`compute_ngram_agg_page`), whole-corpus scope, page 1 by count, median of 5
+Timed end to end through asyncpg against the read path it replaced
+(`compute_ngram_agg_page`, since removed), whole-corpus scope, page 1 by count, median of 5
 warm runs:
 
 | Size | n | `DocumentNgram` (today's path) | `lead()` over `main_token` | Speed-up |
@@ -192,6 +199,14 @@ Why dropping the table is justified:
 What it doesn't do: it is still linear in the words selected. It moves the
 ceiling in §8 by ~2× rather than removing it.
 
+**As shipped** (`dataplane/repositories/postgres/_window_ngram_query.py`), on the
+real corpus, end to end through the Service:
+
+- an n-gram page takes **44–54 ms** (was 132–154 ms);
+- a collocations page takes **37 ms** (was 94 ms);
+- every one of 20 pages checked across n, sort, match mode and offset matches
+  the Tier-0 self-join exactly.
+
 At T1 the window sort over 1.16 M tokens is close to the default
 `work_mem = 4MB`. Check `EXPLAIN (ANALYZE, BUFFERS)` for an external sort
 before going past catalogue size, and raise `work_mem` for the data plane's
@@ -208,13 +223,17 @@ the cheaper features and the cost of a cache hit, is in
 
 | Request | Today (real, 0.04 M words) | Catalogue (synthetic, 0.19 M) | T1 (synthetic, 1.16 M) |
 | --- | --- | --- | --- |
-| N-grams page, n = 5 | 154 ms | 756 ms | **4.25 s** |
-| Collocations page | 94 ms | 526 ms | **2.29 s** |
+| N-grams page, n = 5 | 53 ms | 378 ms † | **1.86 s** † |
+| Collocations page | 37 ms | 217 ms † | **1.28 s** † |
 | KWIC, most common word, `sort=left` | 111 ms | **1.78 s** | **1.94 s** |
 | Word frequency page | 25 ms | 124 ms | 607 ms |
 | Error frequency page | 13 ms | 35 ms | 148 ms |
 | KWIC, default sort | 6–14 ms | 19–33 ms | 79–114 ms |
 | EPIC / error summary | 5–11 ms | 9–21 ms | 47–88 ms |
+
+† The `lead()` query itself, measured before it shipped (§3), without the
+Service's document-id lookup (2–13 ms). Before 7.13 these two rows were
+756 ms / 4.25 s and 526 ms / 2.29 s.
 
 From the earlier two-mode run, raw SQL:
 
@@ -227,16 +246,15 @@ From the earlier two-mode run, raw SQL:
 Four conclusions:
 
 1. **Today, nothing is slow.** The worst request on the real corpus takes
-   154 ms.
+   111 ms (KWIC `sort=left`).
 2. **Cold vs. warm is a 6.7× difference on KWIC.** The cold run read 2,410
    heap pages (~19 MB of random I/O). Sizing RAM so Postgres keeps the token
    indexes resident is the single highest-value decision here — and the disk
    must be NVMe, never network HDD.
-3. **N-gram and collocation pages are the most expensive routine requests**,
-   and they grow fastest.
-   - Each one pulls every candidate n-gram for the selection into Python (35k
-     rows today, 188k at catalogue size, 1.1 M at T1) and sorts it there, on
-     every page. The `lead()` rewrite in §3 roughly halves that.
+3. **N-gram and collocation pages are still the most expensive routine
+   requests at scale**, and they grow fastest.
+   - Since 7.13 they are counted in SQL and only the page comes back, but each
+     request still reads every token in the selection.
    - Word frequency grows linearly too, from a much lower base.
    - KWIC's non-default sorts are bounded by a 10,000-match cap. That is why
      they are cheap today (the most common real word, *saya*, has fewer
@@ -248,9 +266,9 @@ Four conclusions:
 ### Hot working set
 
 What Postgres needs resident for warm-path performance (token heap + token
-indexes + wordfreq + wordtype + n-gram index) is **~0.37 KB per source word**,
-13.7 MB today (measured). That is the RAM target in §7. Without the n-gram table
-it would be ~0.23 KB per word.
+indexes + wordfreq + wordtype) is **~0.23 KB per source word**, about 8.5 MB
+today. That is the RAM target in §7. It was ~0.37 KB per word while the n-gram
+table's index was part of it.
 
 ---
 
@@ -265,10 +283,10 @@ re-run computing the same answer from the source table, both warm.
 | `main_token` | 16% | 2-word KWIC, **rare** term *(two-mode run)* | **0.43 ms** | 32 ms *(content scan)* | **75×** |
 | `main_token` | 16% | 2-word KWIC, **common** term, paginated count *(two-mode run)* | 237 ms | **30 ms** *(content scan)* | **0.13×** |
 | `main_documentwordfreq` | 10% | corpus word frequency, top 50 *(real corpus)* | 6.2 ms | 10.0 ms *(from `main_token`)* | **1.6×** |
-| `main_documentngram` | 62% | corpus bigram page, top 50 *(real corpus, end to end)* | 144 ms | **39 ms** *(`lead()` over `main_token`, §3)* | **0.27×** |
+| ~~`main_documentngram`~~ *(dropped in 7.13)* | was 62% | corpus bigram page, top 50 *(real corpus, end to end)* | 144 ms | **39 ms** *(`lead()` over `main_token`, §3)* | **0.27×** |
 
-So the honest answer is **one does, one barely, and the largest doesn't at
-all**:
+So the honest answer was **one does, one barely, and the largest didn't at
+all**, which is why the largest is gone:
 
 - **`main_token` earns its storage decisively** — but only for selective
   queries. Its cost scales with the number of *matches*, while a content
@@ -280,9 +298,9 @@ all**:
 - **`main_documentwordfreq` barely earns it.** 2.9 MB buys 4 ms on a 10 ms
   query. Worth keeping while that is true, and worth re-measuring at catalogue
   size before deciding anything.
-- **`main_documentngram` doesn't earn it at all.** 62% of the corpus data
-  makes n-gram pages **slower** than computing them from `main_token` in one
-  SQL pass, and it miscounts long documents. §3 recommends dropping it.
+- **`main_documentngram` didn't earn it at all.** 62% of the corpus data made
+  n-gram pages **slower** than computing them from `main_token` in one SQL
+  pass, and it miscounted long documents. Dropped in 7.13 (§3).
 
 ### Why the trade is so weak here
 
@@ -293,12 +311,12 @@ Precomputed aggregates pay off when they *collapse* many rows into few. At a
   47% fewer, the best ratio here, because real learners reuse words within an
   essay. Even so, summing per-document counts is only slightly cheaper than
   counting tokens.
-- `main_documentngram` is **96.9% `count = 1`** rows. It collapses nothing; it
-  only adds a second copy of the data to read.
+- `main_documentngram` was **96.9% `count = 1`** rows. It collapsed nothing;
+  it only added a second copy of the data to read.
 
 **These aggregates are keyed per document, and a document here is too short for
 per-document aggregation to mean anything.** Repetition only appears across
-documents. That is why §3 recommends computing n-grams from the token stream,
+documents. That is why n-grams are now computed from the token stream (§3),
 and why §8 treats a corpus-level rollup as the real scaling work.
 
 ---
@@ -328,7 +346,8 @@ the rest of the stack is running. Build in CI and ship an image, or add swap.
 ## 7. Tiers
 
 T1 and above use the catalogue's 124-word mean. Postgres is sized at the
-measured ~0.82 KB/word plus ~10 MB fixed (§3). Disk is provisioned at ~2.5× the
+measured ~0.3 KB/word plus ~10 MB fixed (§3), now that the n-gram table is
+gone. Disk is provisioned at ~2.5× the
 database for WAL, autovacuum bloat and a local dump, rounded to a sane volume
 size.
 
@@ -339,11 +358,10 @@ size.
 | Documents | **298** | 1,559 | 10,000 | 80,000 | 400,000 |
 | Source words | 0.04 M | 0.19 M | 1.24 M | 9.9 M | 49.6 M |
 | Raw text | ~0.24 MB | ~1.2 MB | ~8 MB | ~62 MB | ~310 MB |
-| **Postgres size** | **41 MB** *(measured)* | **167 MB** *(measured, synthetic)* | **~1.0 GB** *(0.93 GB measured at 1.16 M words)* | **~8 GB** | **~40 GB** |
-| … without per-document n-grams (§3) | 22 MB | ~70 MB | ~0.4 GB | ~3 GB | ~15 GB |
-| Hot set (§4) | 14 MB *(measured)* | 0.07 GB | 0.5 GB | 4 GB | 18 GB |
+| **Postgres size** | **21 MB** *(measured)* | **~70 MB** | **~0.4 GB** | **~3 GB** | **~15 GB** |
+| … with the old n-gram table, for reference | 41 MB *(measured)* | 167 MB *(measured, synthetic)* | ~1.0 GB *(0.93 GB measured at 1.16 M words)* | ~8 GB | ~40 GB |
+| Hot set (§4) | 9 MB | 0.04 GB | 0.3 GB | 2.3 GB | 11 GB |
 | Token rows | 0.04 M | 0.19 M | 1.24 M | 9.9 M | 49.6 M |
-| N-gram rows (if kept) | 0.14 M | 0.76 M | 4.6 M | 37 M | 185 M |
 | Result cache (`kuis-cache`, if built) | — | — | 128 MB | 256 MB | 512 MB |
 
 ### Recommended hardware
@@ -360,27 +378,31 @@ size.
 | uvicorn workers | 2 | 4 | 8 | 8 (per node) |
 | Celery replicas | 1 | 2 | 4 | 8 |
 
-**T0 is where the project is today: 298 documents, 41 MB of Postgres.** A
+**T0 is where the project is today: 298 documents, 21 MB of Postgres.** A
 2 vCPU / 4 GB / 40 GB VPS is generous. The whole database fits in RAM many
-times over. Annotating the rest of the catalogue (1,559 documents, ~167 MB)
+times over. Annotating the rest of the catalogue (1,559 documents, ~70 MB)
 doesn't change that. The step from 4 GB to 8 GB buys headroom for `next build`,
 not for the data.
 
-**T1** still fits one box comfortably: 0.5 GB hot set against 8 GB of RAM
+**T1** still fits one box comfortably: 0.3 GB hot set against 8 GB of RAM
 means effectively every query runs on the warm path.
 
-**T2** is where Postgres should move off the app node. The ~4 GB hot set wants
-RAM that isn't shared with the app workers, and §8's ceiling bites here.
+**T2** is where Postgres should move off the app node. The ~2.3 GB hot set
+wants RAM that isn't shared with the app workers under 40 concurrent requests,
+and §8's ceiling bites here.
 
 **T3** assumes the §8 rollup work has been done. Without it, one n-gram page
-takes over a minute even with the `lead()` rewrite, and no amount of hardware
-fixes that.
+takes over a minute even with the 7.13 `lead()` query, and no amount of
+hardware fixes that.
 
 The DB-node RAM and Postgres memory settings at T2/T3 were halved on 2026-10-19,
 along with the hot set they are sized against. They were 32 GB / 64 GB, sized
 for 8.9 GB / 45 GB hot sets measured before `0017`. Disk was left as
 provisioned: it already had far more than 2.5× headroom. Dropping the n-gram
-table (§3) would add more headroom again.
+table in 7.13 then roughly halved the hot set and the database again. The
+hardware rows were deliberately left as they are, so they now carry about 2×
+headroom at T2/T3. Re-size them from a measurement when T2 is actually
+planned.
 
 ---
 
@@ -390,17 +412,17 @@ Every ranked feature reads all the selected documents' rows at query time, so
 its cost is linear in the number of words selected. Measured at three sizes,
 then extrapolated linearly from T1:
 
-| Tier | Words | N-grams page, n = 5, today's path | Same, `lead()` (§3) | Word frequency page |
+| Tier | Words | N-grams page, n = 5, before 7.13 | Since 7.13 (`lead()`, §3) | Word frequency page |
 | --- | --- | --- | --- | --- |
-| T0 *(today, real)* | 0.04 M | 0.15 s *(measured)* | 0.06 s *(measured)* | 0.03 s *(measured)* |
+| T0 *(today, real)* | 0.04 M | 0.15 s *(measured)* | 0.05 s *(measured)* | 0.03 s *(measured)* |
 | Catalogue | 0.19 M | 0.76 s *(measured)* | 0.38 s *(measured)* | 0.12 s *(measured)* |
 | T1 | 1.16 M | 4.25 s *(measured)* | 1.86 s *(measured)* | 0.61 s *(measured)* |
 | T2 | 9.9 M | ~36 s | ~16 s | ~5 s |
 | T3 | 49.6 M | ~3 min | ~80 s | ~26 s |
 
-**The current design — per-document data summed at query time — holds to
-roughly T1 and fails at T2.** The `lead()` rewrite buys about 2× and makes the
-counts exact, but leaves the curve linear. Past ~1–2 M words the fix is a
+**The current design — every selected document's rows read at query time —
+holds to roughly T1 and fails at T2.** The 7.13 `lead()` query bought about 2×
+and made the counts exact, but left the curve linear. Past ~1–2 M words the fix is a
 corpus-level rollup (a `CorpusWordFreq` / `CorpusNgram` table or a materialized
 view maintained by the worker), not a bigger server.
 
@@ -471,8 +493,9 @@ model instantiation for ~700 objects.
 Each run was `index_document` → `aggregate_document` in one process with
 Celery in eager mode, so there was no broker round trip, on an Apple M2. A VPS
 vCPU is usually slower per core, so plan on ~20 documents per second or below.
-Dropping the n-gram table (§3) removes about two thirds of the rows each
-document writes, so ingest should get faster (**estimated**, not measured).
+The throughput above was measured while the worker still wrote n-grams.
+Dropping them in 7.13 removed about two thirds of the rows each document writes,
+so ingest should now be faster (**estimated**, not measured).
 
 At 20 documents per second:
 
@@ -491,15 +514,14 @@ for the migration and back down afterwards.
 ## 11. Summary
 
 - The corpus is **text, and text is small**: 298 essays, 37,758 words, 237 KB
-  today. Postgres holds 41 MB, ~130× the text, and n-grams are 62% of the
-  corpus data.
-- **~0.82 KB of Postgres per source word** plus ~10 MB fixed; **~0.37 KB per
+  today. Postgres holds 21 MB, ~45× the text.
+- **~0.3 KB of Postgres per source word** plus ~10 MB fixed; **~0.23 KB per
   word** of that wants to stay in RAM.
-- **Drop the per-document n-gram table and compute n-grams from `main_token`
-  with `lead()`** (§3). It is 2–3.7× faster at every size measured, exact where
-  the table undercounts, and frees 62% of corpus storage. **Don't raise the
-  floor to 2**: it keeps 0.7–20% of occurrences and gets almost none of the top
-  100 right.
+- **The per-document n-gram table is gone (7.13)**; n-grams are counted from
+  `main_token` with `lead()` (§3). That measured 2–3.7× faster at every size,
+  exact where the table undercounted, and it freed 62% of corpus storage.
+  Raising the floor to 2 was rejected: it kept 0.7–20% of occurrences and got
+  almost none of the top 100 right.
 - `main_token` clearly pays for itself: 75× on selective queries, and it is
   required for correctness anyway. `main_documentwordfreq` barely does (§5).
 - Today's corpus, and the full catalogue, need a **2 vCPU / 4 GB / 40 GB NVMe

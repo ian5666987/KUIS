@@ -231,7 +231,7 @@ psql -U postgres -c "CREATE DATABASE kuis_dataplane_test OWNER corpus_user;"
 
 The Celery worker is **not** optional scaffolding any more. Uploading a
 document enqueues `index_document`, which tokenizes it, computes the Tier-2
-aggregates (`DocumentWordFreq`, `DocumentNgram`) and extracts error
+aggregate (`DocumentWordFreq`) and extracts error
 annotations. With no broker reachable, the upload itself still succeeds but
 **the document stays untokenized and invisible to every analysis feature**.
 
@@ -333,7 +333,7 @@ database. On a brand-new empty database there is nothing for them to do.
 | Command | What it does |
 |---|---|
 | `retokenize [--all \| --unindexed-only] [--dry-run]` | Rebuilds the `Token` rows of every document whose tokens are stale — never built, built by an older tokenizer version, or built from content edited since — and refreshes the aggregates. Token rows are built at upload and do **not** follow later content edits; run this after editing a document, or after a tokenizer change (bump `TOKENIZER_VERSION`, or pass `--all`). |
-| `backfill_tier2 [--all]` | Computes `DocumentWordFreq`/`DocumentNgram` for documents that have tokens but no aggregates. Does not rebuild tokens. |
+| `backfill_tier2 [--all]` | Computes `DocumentWordFreq` for documents that have tokens but no aggregates. Does not rebuild tokens. |
 | `backfill_error_annotations [--all]` | Extracts `ErrorAnnotation`/`DocumentErrorFreq` for documents uploaded before the error-analytics feature (or before the taxonomy was loaded). Does not rebuild tokens. |
 | `backfill_content_hash` | Recomputes `content_hash` with the canonicalized formula. Only relevant to databases predating migration `0010`; reports collision groups rather than merging them. |
 | `load_metadata_catalogue --relink` | Re-resolves catalogue→document FKs without reading any CSV. |

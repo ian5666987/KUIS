@@ -6,7 +6,6 @@ changing what is counted, and the table controls (filter, sort, paginate,
 export) agreeing with each other.
 """
 
-import importlib
 import json
 from io import StringIO
 from unittest import mock
@@ -879,8 +878,8 @@ class WorkerTaskTests(TestCase):
 
         self.assertEqual(doc.tokens.count(), first_count)
 
-    def test_aggregate_tasks_populate_document_word_freq_and_ngram(self):
-        from .models import DocumentNgram, DocumentWordFreq
+    def test_aggregate_tasks_populate_document_word_freq(self):
+        from .models import DocumentWordFreq
 
         doc = Document.objects.create(title='t.xml', content=CORPUS_XML)
         index_document(doc.id)  # dispatches aggregate_document, eager under test
@@ -889,9 +888,6 @@ class WorkerTaskTests(TestCase):
         self.assertTrue(word_freqs.exists())
         saya_freq = word_freqs.get(word_type__form='saya')
         self.assertEqual(saya_freq.count, 2)  # "saya" appears twice in CORPUS_XML
-
-        ngrams = DocumentNgram.objects.filter(document=doc, n=2)
-        self.assertTrue(ngrams.exists())
 
     def test_unindexed_document_never_reports_itself_ready(self):
         """The regression this whole status mechanism exists for: a Document
@@ -986,13 +982,12 @@ class WorkerTaskTests(TestCase):
         self.assertEqual(doc.status_detail, '')
 
     def test_failed_document_skips_the_aggregate_tasks(self):
-        from .models import DocumentNgram, DocumentWordFreq
+        from .models import DocumentWordFreq
 
         doc = Document.objects.create(title='empty.xml', content='')
         index_document(doc.id)
 
         self.assertFalse(DocumentWordFreq.objects.filter(document=doc).exists())
-        self.assertFalse(DocumentNgram.objects.filter(document=doc).exists())
 
     def test_runs_synchronously_end_to_end_via_delay(self):
         # This is the one test in the file that goes through .delay() itself
@@ -1044,7 +1039,7 @@ class DocumentStatusLifecycleTests(TestCase):
         self.assertFalse(ErrorAnnotation.objects.filter(document=doc).exists())
 
     def test_aggregate_document_builds_every_derived_table_then_marks_ready(self):
-        from .models import DocumentErrorFreq, DocumentNgram, DocumentWordFreq, ErrorAnnotation
+        from .models import DocumentErrorFreq, DocumentWordFreq, ErrorAnnotation
         from worker.tasks.indexing import aggregate_document
 
         doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
@@ -1053,7 +1048,6 @@ class DocumentStatusLifecycleTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.status, Document.STATUS_READY)
         self.assertTrue(DocumentWordFreq.objects.filter(document=doc).exists())
-        self.assertTrue(DocumentNgram.objects.filter(document=doc).exists())
         self.assertTrue(ErrorAnnotation.objects.filter(document=doc).exists())
         self.assertTrue(DocumentErrorFreq.objects.filter(document=doc).exists())
 
@@ -1062,7 +1056,7 @@ class DocumentStatusLifecycleTests(TestCase):
         from worker.tasks.indexing import aggregate_document
 
         doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
-        with mock.patch('worker.tasks.indexing.compute_document_ngrams', side_effect=RuntimeError('disk full')):
+        with mock.patch('worker.tasks.indexing.extract_document_error_annotations', side_effect=RuntimeError('disk full')):
             with self.assertRaises(RuntimeError):
                 aggregate_document(doc.id)
 
@@ -1081,7 +1075,7 @@ class DocumentStatusLifecycleTests(TestCase):
         from worker.tasks.indexing import aggregate_document
 
         doc = _tokenize_only('n.xml', NESTED_CORPUS_XML)
-        with mock.patch('worker.tasks.indexing.compute_document_ngrams', side_effect=RuntimeError('disk full')):
+        with mock.patch('worker.tasks.indexing.extract_document_error_annotations', side_effect=RuntimeError('disk full')):
             with self.assertRaises(RuntimeError):
                 aggregate_document(doc.id)
 
@@ -1117,73 +1111,6 @@ class DocumentStatusLifecycleTests(TestCase):
 
         doc.refresh_from_db()
         self.assertEqual(doc.status, Document.STATUS_INDEXING)
-
-
-class TokenizedStatusMigrationTests(TestCase):
-    """main/migrations/0018_document_status_tokenized.py's data step: `ready`
-    documents missing derived rows (the old fire-and-forget's leftovers) go
-    back to `tokenized`; complete ones are untouched."""
-
-    @classmethod
-    def setUpTestData(cls):
-        call_command('load_error_taxonomy', stdout=StringIO())
-
-    def _ready(self, title, content):
-        doc = Document.objects.create(title=title, content=content)
-        index_document(doc.id)
-        doc.refresh_from_db()
-        self.assertEqual(doc.status, Document.STATUS_READY)
-        return doc
-
-    def _migrate(self):
-        from django.apps import apps
-
-        migration = importlib.import_module('main.migrations.0018_document_status_tokenized')
-        migration.demote_incomplete_ready_documents(apps, None)
-
-    def _status(self, doc):
-        doc.refresh_from_db()
-        return doc.status
-
-    def test_demotes_only_ready_documents_missing_derived_rows(self):
-        from .models import DocumentErrorFreq, DocumentNgram, DocumentWordFreq, ErrorAnnotation
-
-        # content_hash is unique, so every document needs distinct content.
-        def variant(word):
-            return NESTED_CORPUS_XML.replace('sekali', word)
-
-        complete = self._ready('complete.xml', variant('sekali'))
-        plain = self._ready('plain.txt', PLAIN_TEXT)  # no <segment>: zero annotations is correct
-
-        no_word_freq = self._ready('no-word-freq.xml', variant('dua'))
-        DocumentWordFreq.objects.filter(document=no_word_freq).delete()
-
-        no_ngrams = self._ready('no-ngrams.xml', variant('tiga'))
-        DocumentNgram.objects.filter(document=no_ngrams).delete()
-
-        no_annotations = self._ready('no-annotations.xml', variant('empat'))
-        ErrorAnnotation.objects.filter(document=no_annotations).delete()
-        DocumentErrorFreq.objects.filter(document=no_annotations).delete()
-
-        no_error_freq = self._ready('no-error-freq.xml', variant('lima'))
-        DocumentErrorFreq.objects.filter(document=no_error_freq).delete()
-
-        self._migrate()
-
-        self.assertEqual(self._status(complete), Document.STATUS_READY)
-        self.assertEqual(self._status(plain), Document.STATUS_READY)
-        for doc in (no_word_freq, no_ngrams, no_annotations, no_error_freq):
-            self.assertEqual(self._status(doc), Document.STATUS_TOKENIZED, doc.title)
-
-    def test_leaves_failed_and_indexing_documents_alone(self):
-        failed = Document.objects.create(title='empty.xml', content='')
-        index_document(failed.id)
-        never_indexed = Document.objects.create(title='t.xml', content=CORPUS_XML)
-
-        self._migrate()
-
-        self.assertEqual(self._status(failed), Document.STATUS_FAILED)
-        self.assertEqual(self._status(never_indexed), Document.STATUS_INDEXING)
 
 
 class AggregateDocumentsCommandTests(TestCase):

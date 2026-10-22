@@ -15,7 +15,7 @@ class Command(BaseCommand):
         "TOKENIZER_VERSION, or built from content the document no longer holds, "
         "e.g. after an edit in the admin (worker/tasks/maintenance.py) — and "
         "dispatches aggregate_document to rebuild everything derived from them "
-        "(DocumentWordFreq/DocumentNgram/ErrorAnnotation/DocumentErrorFreq), "
+        "(DocumentWordFreq/ErrorAnnotation/DocumentErrorFreq), "
         "which would otherwise go stale against the rebuilt tokens. Token "
         "rebuilding happens synchronously as this command runs, leaving each "
         "document 'tokenized'; aggregate_document is dispatched via Celery "
@@ -79,7 +79,7 @@ class Command(BaseCommand):
         # Delegates to the same task the worker runs for a new upload
         # (architecture plan §5) rather than duplicating its tokenize ->
         # hash -> aggregate sequence here — this command used to do that
-        # itself and NOT recompute DocumentWordFreq/DocumentNgram
+        # itself and NOT recompute the Tier-2 aggregates
         # afterward, silently leaving them stale against the rebuilt
         # tokens (exactly the kind of drift docs/data-processing.md's
         # content-hash section warns about). Called directly rather than
