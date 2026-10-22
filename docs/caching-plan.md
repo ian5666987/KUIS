@@ -19,7 +19,7 @@ A server-side cache pays for itself only when all four of these hold:
 
 | Test | Today (real corpus: 298 docs, 0.04 M words) | Catalogue complete (1,559 docs, 0.19 M) | T1 (≈ 10,000 docs, 1.2 M) |
 | --- | --- | --- | --- |
-| **1. A miss is slow enough for users to notice** (≳ 0.5–1 s) | ✗ The slowest request is **111 ms** (KWIC `sort=left`); most are under 55 ms | ~ 1.8 s on KWIC's non-default sorts; n-gram and collocation pages 0.2–0.4 s since 7.13. Under ~0.4 s throughout once the KWIC sort fix lands | ✓ 1–2 s even after the query fixes; 2–4 s before them |
+| **1. A miss is slow enough for users to notice** (≳ 0.5–1 s) | ✗ The slowest request is **111 ms** (KWIC `sort=left`); most are under 55 ms | ~ 1.8 s on KWIC's non-default sorts; n-gram and collocation pages 0.2–0.4 s. Under ~0.4 s throughout once the KWIC sort fix lands | ✓ 1–2 s even after the query fixes; 2–4 s before them |
 | **2. Requests actually repeat** | ~ Unknown. Shared landing views and classroom use would repeat; TanStack Query already serves same-browser repeats for 5 min | same | same |
 | **3. No cheaper fix exists** | ✗ The query fixes (§8) are cheaper and make *first* requests faster too | ✗ same | ~ The query fixes help ~2×, but the cost stays linear |
 | **4. The cost is low** | ✓ One container, ≤ 128 MB, no disk | ✓ | ✓ |
@@ -33,7 +33,7 @@ request nobody perceives as slow. Meanwhile it adds:
 - about ten tests.
 
 **At catalogue size it is borderline before the query fixes and unjustified
-after them.** The n-gram fix has shipped (7.13, `docs/hosting.md` §3): it
+after them.** The n-gram fix has shipped (`docs/hosting.md` §3): it
 measures 0.22–0.38 s for the worst ranked page at that size. The KWIC sort fix
 should bring `sort=left|right|document` near the default sort's cost
 (**estimated**).
@@ -49,8 +49,6 @@ views instant, until the corpus-level rollup in `docs/hosting.md` §8 exists.
    later.
 2. ✅ **Done in 7.13:** the n-gram/collocation read path is a `lead()` query
    over `main_token`, and `DocumentNgram` is dropped (`docs/hosting.md` §3).
-   It measured 2–3.7× faster at every size, exact, and it freed 62% of corpus
-   storage.
 3. **Sort KWIC `left|right|document` in SQL** (§8). This removes the
    10,000-window load.
 4. **Keep this design on file.** Nothing in it goes stale while it waits. It
@@ -92,11 +90,11 @@ times after one warm-up run, and the median taken. Entry sizes are
 Everything ran on Postgres 18.1 on an Apple M2. Production runs `postgres:16`
 on VPS vCPUs, so read the timings as relative.
 
-| Scale | Documents | Words | Database |
+| Scale | Documents | Words |
 | --- | --- | --- | --- |
-| **Today (real)** | 298 | 37,758 | 41 MB |
-| Catalogue complete (synthetic) | 1,559 | 193,813 | 167 MB |
-| T1 (synthetic) | 9,354 | 1,162,878 | 926 MB |
+| **Today (real)** | 298 | 37,758 |
+| Catalogue complete (synthetic) | 1,559 | 193,813 |
+| T1 (synthetic) | 9,354 | 1,162,878 |
 
 Every request below uses the **whole corpus** as its scope, the worst case.
 Synthetic text repeats less than real learner text, so synthetic distinct
@@ -125,9 +123,7 @@ n-gram counts, and the full-list sizes in §4, are upper bounds.
 | `resolve_document_ids` alone | 1.0 ms | 2.2 ms | 12.8 ms | — (not cached; runs on every request) |
 | **A cache hit** | **≈ 1.2 ms** | **≈ 2.5 ms** | **≈ 13 ms** | lookup + one Redis `GET` (0.10–0.31 ms) |
 
-† The 7.13 `lead()` query, measured before it shipped, without the Service's
-document-id lookup. Before 7.13 these rows were 685 / 756 ms and 3,569 /
-4,252 ms (n-grams) and 526 / 2,287 ms (collocations).
+† The n-gram query alone, without the Service's document-id lookup.
 
 At today's size a hit saves 4–110 ms per request. That's the number behind
 §1's "not justified".
@@ -135,10 +131,9 @@ At today's size a hit saves 4–110 ms per request. That's the number behind
 Four paths account for nearly all of the cost at larger sizes, and each is
 slow for a specific, fixable reason:
 
-- **N-grams and collocations.** Fixed in 7.13, and still the costliest at scale.
-  The old path pulled every candidate n-gram into Python (1.1 M rows at T1) and
-  sorted it there. The `lead()` query sorts in SQL and returns only the page,
-  but it still reads every token in the selection.
+- **N-grams and collocations.** Still the costliest at scale. The `lead()`
+  query sorts in SQL and returns only the page, but it reads every token in the
+  selection.
 - **KWIC `sort=left|right|document`.** `PostgresKWICRepository.search` fetches up
   to `MAX_UNPAGINATED_MATCHES` (10,000) matches, loads every one's context
   window in one large `OR` query, sorts in Python, then slices.
@@ -187,7 +182,7 @@ corpus. This is the design.
 | **B.** In-memory LRU in each uvicorn worker | ×4 copies | 0 | none | ~¼ of repeats (requests round-robin across 4 workers) | still needs a shared invalidation signal; memory sits inside the API processes |
 | **C.** Redis, final page | 64–128 MB cap | 0 | one small container | any exact repeat, across users and sessions | a new page, sort or filter is still a miss; data can be stale up to the TTL if a generation bump is lost (§6.5) |
 | **D.** Redis, full ranked list | 0.5–1 GB+ at T1 (**estimated**) | 0 | same as C | page, sort and filter changes too | §4: entries too large to beat recomputing at T1, and worse beyond |
-| **E.** Fix the slow queries | 0 (the n-gram fix, shipped in 7.13, *freed* 62% of corpus storage) | − | none | first requests too | engineering time; repeats still cost full price |
+| **E.** Fix the slow queries | 0 | − | none | first requests too | engineering time; repeats still cost full price |
 
 **The decision:**
 
@@ -429,11 +424,8 @@ None of this needs a cache, and all of it helps the first request:
 
 1. ✅ **Done in 7.13: n-grams and collocations are computed from `main_token`
    with `lead()`, and `DocumentNgram` is dropped.**
-   - Measured in full in `docs/hosting.md` §3: 39–58 ms against 134–176 ms today,
-     217–378 ms against 536–762 ms at catalogue size, and 1.3–1.9 s against
-     2.3–4.2 s at T1.
-   - The counts are exact; the table undercounted long documents.
-   - It freed 62% of corpus storage.
+   - Measured: 39–58 ms today, 217–378 ms at catalogue size, 1.3–1.9 s at T1.
+   - The counts are exact.
 2. **KWIC `sort=left|right`: get the sort key in SQL.**
    - Join the token at `position - 1` (or `position + n`) to get the adjacent
      word, order by it, and paginate in SQL.
