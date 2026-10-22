@@ -6,14 +6,15 @@ them as the same kind of fact as a measurement.
 
 **Where the measurements come from (re-measured 2026-10-19/20):**
 
-- **Today** is the real annotated corpus: the 298 XML files in
+- **T0 (today)** is the real annotated corpus: the 298 XML files in
   `Koper/Results/Eror-XML` (APU, CHU, KUIS, SFC, SOP and TUFS 45 each, OU 28).
   They were loaded through the real `get_or_create_document` →
   `index_document` → `aggregate_document` path into a throwaway database.
-- **Catalogue size** (1,559 documents, every essay in `metadata/*.csv`) and
-  **T1 size** (9,354 documents) are synthetic. Each document is generated at a
-  catalogue row's real word count, with a Zipfian vocabulary, and indexed
-  through the same path. See `docs/caching-plan.md` §2.
+  **Every tier in §7 is T0 scaled up.**
+- **Query timings at T1 size** (9,354 documents, 1.16 M words) come from a
+  synthetic corpus. Each document is generated at a `metadata/*.csv` row's real
+  word count, with a Zipfian vocabulary, and indexed through the same path. See
+  `docs/caching-plan.md` §2.
 - All runs used Postgres 18.1 on an Apple M2. Storage figures carry over to
   production's `postgres:16` essentially unchanged. Timings are relative, not
   production latencies.
@@ -59,9 +60,9 @@ Stated up front because every tier below is just these numbers multiplied.
 | Error annotations | **0.126 per word** (4,758 segments) |
 
 The annotated set is more skewed than the catalogue as a whole. The catalogue
-has a similar mean (124 words) but its median is 94 and its p90 301. That is why
-the catalogue-size and T1 runs use the catalogue's distribution rather than
-today's.
+has a similar mean (124 words) but its median is 94 and its p90 301. The
+synthetic T1 timing run uses the catalogue's distribution; the §7 sizing uses
+today's 127-word mean.
 
 **These are short student essays, not books.** The entire corpus today is
 about **237 KB of plain text**. Sizing this system in "GB of corpus" is
@@ -111,7 +112,7 @@ the taxonomy. It doesn't grow with the corpus.
 
 Two constants fall out of this, and they drive every tier:
 
-- **~0.3 KB of Postgres per source word**, plus ~10 MB fixed.
+- **~0.3 KB of Postgres per source word**, plus ~9 MB fixed.
 - **~38 KB of Postgres per document** (at the 127-word mean).
 
 That is a ~**50×** blow-up over the raw text. `main_token` is the largest table
@@ -134,7 +135,7 @@ corpora. The cost is linear in the words selected (§8).
 
 At T1 the window sort over 1.16 M tokens is close to the default
 `work_mem = 4MB`. Check `EXPLAIN (ANALYZE, BUFFERS)` for an external sort
-before going past catalogue size, and raise `work_mem` for the data plane's
+before reaching T1, and raise `work_mem` for the data plane's
 role if one appears.
 
 ---
@@ -146,15 +147,15 @@ whole corpus selected, which is the worst-case scope. The full table, including
 the cheaper features and the cost of a cache hit, is in
 `docs/caching-plan.md` §3.
 
-| Request | Today (real, 0.04 M words) | Catalogue (synthetic, 0.19 M) | T1 (synthetic, 1.16 M) |
-| --- | --- | --- | --- |
-| N-grams page, n = 5 | 53 ms | 378 ms † | **1.86 s** † |
-| Collocations page | 37 ms | 217 ms † | **1.28 s** † |
-| KWIC, most common word, `sort=left` | 111 ms | **1.78 s** | **1.94 s** |
-| Word frequency page | 25 ms | 124 ms | 607 ms |
-| Error frequency page | 13 ms | 35 ms | 148 ms |
-| KWIC, default sort | 6–14 ms | 19–33 ms | 79–114 ms |
-| EPIC / error summary | 5–11 ms | 9–21 ms | 47–88 ms |
+| Request | T0 (today, real, 0.04 M words) | T1 (synthetic, 1.16 M) |
+| --- | --- | --- |
+| N-grams page, n = 5 | 53 ms | **1.86 s** † |
+| Collocations page | 37 ms | **1.28 s** † |
+| KWIC, most common word, `sort=left` | 111 ms | **1.94 s** |
+| Word frequency page | 25 ms | 607 ms |
+| Error frequency page | 13 ms | 148 ms |
+| KWIC, default sort | 6–14 ms | 79–114 ms |
+| EPIC / error summary | 5–11 ms | 47–88 ms |
 
 † The n-gram query alone, without the Service's document-id lookup
 (2–13 ms).
@@ -216,8 +217,8 @@ So the honest answer is **one does, and one barely**:
   It is also not really optional: a content scan cannot produce positions,
   and it matches substrings.
 - **`main_documentwordfreq` barely earns it.** 2.9 MB buys 4 ms on a 10 ms
-  query. Worth keeping while that is true, and worth re-measuring at catalogue
-  size before deciding anything.
+  query. Worth keeping while that is true, and worth re-measuring at T1 size
+  before deciding anything.
 
 ### Why the trade is so weak here
 
@@ -260,26 +261,33 @@ the rest of the stack is running. Build in CI and ship an image, or add swap.
 
 ## 7. Tiers
 
-T1 and above use the catalogue's 124-word mean. Postgres is sized at the
-measured ~0.3 KB/word plus ~10 MB fixed (§3). Disk is provisioned at ~2.5× the
-database for WAL, autovacuum bloat and a local dump, rounded to a sane volume
-size.
+**T0 is the corpus as it is today, measured. T1–T3 are T0 scaled up** by
+document count, keeping T0's measured shape:
 
-| | **T0 Pilot** *(today)* | **Catalogue complete** | **T1 Department** | **T2 Multi-university** | **T3 National** |
-| --- | --- | --- | --- | --- | --- |
-| Named users | ≤ 25 | ≤ 25 | ≤ 100 | ≤ 500 | ≤ 2,000 |
-| Concurrent users | ≤ 5 | ≤ 5 | ≤ 10 | ≤ 40 | ≤ 150 |
-| Documents | **298** | 1,559 | 10,000 | 80,000 | 400,000 |
-| Source words | 0.04 M | 0.19 M | 1.24 M | 9.9 M | 49.6 M |
-| Raw text | ~0.24 MB | ~1.2 MB | ~8 MB | ~62 MB | ~310 MB |
-| **Postgres size** | **21 MB** *(measured)* | **~70 MB** | **~0.4 GB** | **~3 GB** | **~15 GB** |
-| Hot set (§4) | 9 MB | 0.04 GB | 0.3 GB | 2.3 GB | 11 GB |
-| Token rows | 0.04 M | 0.19 M | 1.24 M | 9.9 M | 49.6 M |
-| Result cache (`kuis-cache`, if built) | — | — | 128 MB | 256 MB | 512 MB |
+- 127 words per document;
+- ~0.31 KB of Postgres per word, plus ~9 MB fixed (§3);
+- ~0.23 KB of hot set per word (§4);
+- ~6.3 bytes of raw text per word.
+
+T1 is 34× today, T2 268× and T3 1,342×. Everything beyond T0 is **estimated**.
+Disk is provisioned at ~2.5× the database for WAL, autovacuum bloat and a local
+dump, rounded to a sane volume size.
+
+| | **T0 Pilot** *(today, measured)* | **T1 Department** | **T2 Multi-university** | **T3 National** |
+| --- | --- | --- | --- | --- |
+| Named users | ≤ 25 | ≤ 100 | ≤ 500 | ≤ 2,000 |
+| Concurrent users | ≤ 5 | ≤ 10 | ≤ 40 | ≤ 150 |
+| Documents | **298** | 10,000 | 80,000 | 400,000 |
+| Source words | **37,758** | 1.27 M | 10.1 M | 50.7 M |
+| Raw text | **237 KB** | ~8 MB | ~60 MB | ~300 MB |
+| **Postgres size** | **21 MB** | **~0.4 GB** | **~3.0 GB** | **~15 GB** |
+| Hot set (§4) | **9 MB** | 0.3 GB | 2.2 GB | 11 GB |
+| Token rows | **37,758** | 1.27 M | 10.1 M | 50.7 M |
+| Result cache (`kuis-cache`, if built) | — | 128 MB | 256 MB | 512 MB |
 
 ### Recommended hardware
 
-| | **T0** (and catalogue complete) | **T1** | **T2** | **T3** |
+| | **T0** | **T1** | **T2** | **T3** |
 | --- | --- | --- | --- | --- |
 | Topology | single VPS | single VPS | app node + DB node | 2 app nodes + DB + read replica |
 | vCPU | 2 (4 comfortable) | 4 | 4 app / 8 DB | 8 ×2 app / 16 DB |
@@ -293,14 +301,13 @@ size.
 
 **T0 is where the project is today: 298 documents, 21 MB of Postgres.** A
 2 vCPU / 4 GB / 40 GB VPS is generous. The whole database fits in RAM many
-times over. Annotating the rest of the catalogue (1,559 documents, ~70 MB)
-doesn't change that. The step from 4 GB to 8 GB buys headroom for `next build`,
-not for the data.
+times over. The step from 4 GB to 8 GB buys headroom for `next build`, not for
+the data.
 
 **T1** still fits one box comfortably: 0.3 GB hot set against 8 GB of RAM
 means effectively every query runs on the warm path.
 
-**T2** is where Postgres should move off the app node. The ~2.3 GB hot set
+**T2** is where Postgres should move off the app node. The ~2.2 GB hot set
 wants RAM that isn't shared with the app workers under 40 concurrent requests,
 and §8's ceiling bites here.
 
@@ -311,21 +318,127 @@ The T2/T3 database rows carry about 2× headroom over the hot sets above, and
 disk far more than 2.5×. Re-size them from a measurement when T2 is actually
 planned.
 
+### T0 provider options (priced October 2026)
+
+**Constraints:**
+
+- **The server must run in a Japan region.** The contributing universities are
+  in Japan.
+- **The provider must be one of the major global clouds:** AWS, Microsoft
+  Azure, Google Cloud or DigitalOcean.
+
+**DigitalOcean drops out.** It has no datacenter in Japan: its 16 are in the US,
+Canada, Europe, Singapore, India and Australia. That leaves AWS, Azure and
+Google Cloud, all priced below in **Tokyo**. Osaka costs the same or slightly
+more on each.
+
+What T0 needs from a server:
+
+- **RAM: 4 GB works, 8 GB is comfortable.** The stack's fixed floor is ~3.0 GB
+  (§6) with 4 uvicorn workers, or ~2.5 GB with T0's 2. On a 4 GB box, build
+  KUIS-FE in CI rather than on the server, because `next build` needs 2–3 GB on
+  its own.
+- **2 vCPU and ~40 GB of disk.**
+- **Disk speed doesn't matter at T0.** The whole database is 21 MB, so it lives
+  in RAM.
+- **No managed services.** Everything runs in Docker Compose behind
+  nginx-gateway.
+
+Prices are monthly in USD, Tokyo, on demand. EC2, Google Cloud and Azure bill
+the disk and the public IPv4 address separately; "Est. total" adds 40 GB of
+disk and one IPv4 address. AWS charges $0.005 per hour for an IPv4 address
+(~$3.65 a month, per AWS). The Google Cloud and Azure disk and IP add-ons are
+**estimated**. Lightsail's bundle already includes all three: disk, IPv4 and
+transfer.
+
+**4 GB class (meets T0)**
+
+| Provider and plan | vCPU / RAM | Disk | Listed price | Est. total | 1-year commitment | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| **AWS Lightsail 4 GB** | 2 / 4 GB | 80 GB SSD, included | **$24.00** | **$24** | — | Static IPv4 and 4 TB of transfer included |
+| AWS EC2 t4g.medium (Arm) | 2 / 4 GB | 40 GB gp3, $3.84 | $31.54 | ~$39 | ~$27 | Arm: the images must also be built for arm64 |
+| AWS EC2 t3.medium (x86) | 2 / 4 GB | 40 GB gp3, $3.84 | $39.71 | ~$47 | ~$33 | Runs today's amd64 images as they are |
+| Google Cloud e2-medium | 2 shared / 4 GB | 40 GB balanced, ~$5 | $31.38 | ~$40 | — | |
+| Azure B2als_v2 | 2 / 4 GB | managed disk, ~$3–6 | $35.77 | ~$43–45 | — | |
+
+**8 GB class (comfortable at T0)**
+
+| Provider and plan | vCPU / RAM | Listed price | Est. total | 1-year commitment |
+| --- | --- | --- | --- | --- |
+| AWS Lightsail 8 GB | 2 / 8 GB, 160 GB included | $44.00 | $44 | — |
+| AWS EC2 t4g.large (Arm) | 2 / 8 GB | $63.07 | ~$71 | ~$47 |
+| Google Cloud e2-standard-2 | 2 / 8 GB | $62.75 | ~$72 | ~$48 |
+| Azure B2as_v2 | 2 / 8 GB | $71.54 | ~$80 | — |
+
+T1 asks for 4 vCPU and 8 GB. Lightsail's nearest 4 vCPU plan is 16 GB at $84.
+
+**Choice for T0: AWS Lightsail 4 GB in Tokyo, $24/month.**
+
+- **It is the cheapest option that meets every constraint, by a wide margin.**
+  The same 2 vCPU / 4 GB costs ~$39–47 on EC2, ~$40 on Google Cloud and ~$43–45
+  on Azure once the disk and IP are added.
+- **The bundle includes what a single-VPS stack needs:** 80 GB of disk, a static
+  IPv4 and 4 TB of transfer, at a flat monthly price with no egress bill to
+  watch.
+- **T0 uses nothing that would justify the full clouds.** It needs no VPC
+  design, no IAM roles and no managed database. It is one Ubuntu box running
+  Docker Compose, which is the org's existing deployment shape.
+- **Snapshots** cost $0.05 per GB-month, so backing up the 80 GB disk costs at
+  most ~$4 a month.
+
+When to move off it:
+
+- **Growing within Lightsail:** you can't resize a Lightsail instance in place.
+  Moving to a bigger bundle means creating a new instance from a snapshot,
+  which is minutes of work at this size.
+- **Toward T2** (separate app and DB nodes, §7), move to EC2, in Tokyo, inside
+  the same AWS account. Lightsail can peer with a VPC in its region, so the
+  move can happen in steps.
+
+**Runner-up: AWS EC2 t3.medium on a 1-year reservation, ~$33/month.** It is the
+pick if the org would rather start inside EC2 and a VPC from day one. It is x86,
+so it runs the current amd64 images as they are. The Arm t4g.medium is ~$6
+cheaper again (~$27 reserved) but needs arm64 image builds in CI.
+
+**Google Cloud or Azure** only make sense if the org already has an account
+with credits or a university agreement on one of them. At list price they cost
+~1.7–1.9× Lightsail for the same machine.
+
+The org's existing shared VPS remains the zero-cost route if it is itself on
+one of these providers in Japan and has ~3 GB of RAM free (`free -h`).
+
+Prices change, and several come from third-party price trackers rather than the
+provider's own page. Lightsail's prices and snapshot rate, DigitalOcean's
+region list and AWS's IPv4 charge are from the providers themselves. Re-check
+before buying.
+
+Sources: [AWS Lightsail pricing](https://aws.amazon.com/lightsail/pricing/),
+[AWS public IPv4 charge](https://aws.amazon.com/blogs/aws/new-aws-public-ipv4-address-charge-public-ip-insights),
+[DigitalOcean regions](https://docs.digitalocean.com/platform/regional-availability/),
+[t4g.medium](https://aws-pricing.com/t4g.medium.html),
+[t4g.large](https://aws-pricing.com/t4g.large.html),
+[t3.medium](https://aws-pricing.com/t3.medium.html) and
+[EBS gp3 in Tokyo](https://aws-pricing.com/ap-northeast-1.html) (aws-pricing.com),
+[e2-medium](https://gcloud-compute.com/e2-medium.html),
+[e2-standard-2](https://gcloud-compute.com/e2-standard-2.html) and
+[Tokyo disk prices](https://gcloud-compute.com/asia-northeast1.html) (gcloud-compute.com),
+[Azure Japan East prices (azurespeed)](https://www.azurespeed.com/AzureVmPricing/Regions/japaneast),
+[Azure IP pricing](https://azure.microsoft.com/en-us/pricing/details/ip-addresses/).
+
 ---
 
 ## 8. The real ceiling is architectural, not hardware
 
 Every ranked feature reads all the selected documents' rows at query time, so
-its cost is linear in the number of words selected. Measured at three sizes,
-then extrapolated linearly from T1:
+its cost is linear in the number of words selected. Measured at T0 and at T1
+size, then extrapolated linearly from T1 to the §7 word counts:
 
 | Tier | Words | N-grams page, n = 5 | Word frequency page |
 | --- | --- | --- | --- |
 | T0 *(today, real)* | 0.04 M | 0.05 s *(measured)* | 0.03 s *(measured)* |
-| Catalogue | 0.19 M | 0.38 s *(measured)* | 0.12 s *(measured)* |
 | T1 | 1.16 M | 1.86 s *(measured)* | 0.61 s *(measured)* |
-| T2 | 9.9 M | ~16 s | ~5 s |
-| T3 | 49.6 M | ~80 s | ~26 s |
+| T2 | 10.1 M | ~16 s | ~5 s |
+| T3 | 50.7 M | ~80 s | ~27 s |
 
 **The current design — every selected document's rows read at query time —
 holds to roughly T1 and fails at T2.** Past ~1–2 M words the fix is a
@@ -406,7 +519,7 @@ At 20 documents per second:
 
 | Tier | Documents | 1 worker | 4 workers |
 | --- | --- | --- | --- |
-| Catalogue complete | 1,559 | ~1.3 min | — |
+| T0 (today) | 298 | ~13 s *(measured)* | — |
 | T1 | 10,000 | ~8 min | ~2 min |
 | T2 | 80,000 | ~67 min | ~17 min |
 | T3 | 400,000 | ~5.5 h | ~1.4 h |
@@ -420,14 +533,15 @@ for the migration and back down afterwards.
 
 - The corpus is **text, and text is small**: 298 essays, 37,758 words, 237 KB
   today. Postgres holds 21 MB, ~50× the text.
-- **~0.3 KB of Postgres per source word** plus ~10 MB fixed; **~0.23 KB per
+- **~0.3 KB of Postgres per source word** plus ~9 MB fixed; **~0.23 KB per
   word** of that wants to stay in RAM.
 - **N-grams and collocations have no table**: they are counted from
   `main_token` with one `lead()` query (§3).
 - `main_token` clearly pays for itself: 75× on selective queries, and it is
   required for correctness anyway. `main_documentwordfreq` barely does (§5).
-- Today's corpus, and the full catalogue, need a **2 vCPU / 4 GB / 40 GB NVMe
-  VPS**. It would still fit comfortably at 10,000 documents on 4 vCPU / 8 GB.
+- Today's corpus (T0) needs a **2 vCPU / 4 GB / 40 GB VPS**: **AWS Lightsail
+  4 GB in Tokyo, $24/month** (§7, T0 provider options). It would still fit comfortably at
+  10,000 documents on 4 vCPU / 8 GB.
 - Fix the worker's pool and gunicorn's worker count (§9) before concluding
   the hardware is too small — at T0 and T1 it almost certainly isn't.
 - The result cache is **not justified today** (`docs/caching-plan.md` §1). If
