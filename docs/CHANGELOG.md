@@ -54,7 +54,7 @@ SSH deploy on `workflow_dispatch`.
 | **7.10** | 2026-10-19 | `tokenized` document status (migration `0018`). Indexing split into `index_document` (→ `tokenized`) and `aggregate_document` (→ `ready`, all four derived tables plus the status flip in one transaction). The data plane now scopes by status: KWIC accepts `tokenized`/`ready`, every other feature `ready` only. `ready` used to be set before the aggregates were dispatched fire-and-forget, so it guaranteed nothing about them. New `aggregate_documents` repair command; KUIS-FE shows the new state |
 | **7.11** | 2026-10-19 | Token staleness check (`worker/tasks/maintenance.py`). `retokenize` now rebuilds only documents whose tokens are stale — never built, built by an older `TOKENIZER_VERSION`, or built from content since edited (detected by re-hashing `content`, since an admin edit never updates `content_hash`) — with `--all` for the old everything-pass. New `reindex_stale_documents` task, dispatched hourly by a new `kuis-beat` (celery beat) service. `index_document` clears `tokenized_hash` before replacing tokens and holds a row lock across delete-and-rebuild: two concurrent runs for one document used to double its tokens. Scans stream content with `.iterator()` |
 | **7.12** | 2026-10-19 | `Document.save()` recomputes `content_hash` whenever it writes `content`, so an admin or shell edit moves the dedup key with the text (the formula moved to `main/content_hash.py` so the model can import it); the admin refuses an edit to another document's text and shows the hash/version columns read-only. `_get_selected_documents` matches corpus membership with `id IN (…)` instead of a join + `.distinct()` — whose `count()`/`aggregate()` ran `SELECT DISTINCT` over every column, document text included — and defers `content`; the two views that tokenize fetch it in one ordered query, and `_analysis_context` takes its count and token total from one `aggregate()`. `corpus_db` migrated to `0018` (it had stopped at `0016`, so the corrected-text rows were still there) and rebuilt with `index_document`, except `TUFS.csv` |
-| **8** | — | ⬜ **Not started.** Caching (Tier 4) + retiring the superseded Django live-parse views |
+| **8** | — | ⬜ **Not started.** Caching (Tier 4) + retiring the superseded Django live-parse views. Plan and measurements: `docs/caching-plan.md` |
 
 Test-suite growth, for scale: 29 Django tests at Phase 0 → 256 today, plus 181
 data plane tests.
@@ -91,7 +91,8 @@ data plane tests.
 - **The Tier-4 cache key is wider than planned** — the metadata filter (7.7) and
   its author facets (7.8) are additional scoping axes, so any key must cover all
   five facets plus the `__none__` sentinel per facet, or a filtered request will
-  serve an unfiltered result.
+  serve an unfiltered result. `docs/caching-plan.md` §6.4 proposes keying on the
+  resolved document IDs instead, which covers every facet by construction.
 
 ## Infrastructure still outstanding
 

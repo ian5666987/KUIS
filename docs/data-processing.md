@@ -1023,7 +1023,29 @@ code set** — or a filtered request will serve an unfiltered result. The author
 for what the filter carries is `MetadataFilter` in
 `dataplane/repositories/base.py`, not a list duplicated in a doc.
 
+The full plan, with measured costs, entry sizes and the resource impact, is in
+`docs/caching-plan.md`. It proposes keying on the **resolved document IDs**
+rather than on the filter fields, which covers every facet by construction.
+Measured on the real corpus (298 documents), the cache is **not justified yet**:
+the slowest data plane request takes 154 ms. The doc gives the triggers for
+building it, and the query fixes to do first.
+
 ### Open defects and gaps
+
+- **`DocumentNgram` undercounts long documents.** `TOP_K_PER_DOCUMENT = 500`
+  (`worker/tasks/aggregates.py`) keeps only the top 500 n-grams of each size per
+  document. Any document with more distinct n-grams than that loses the rest,
+  ties broken arbitrarily. On the real corpus that is 3 essays, costing 0.14–0.77%
+  of all occurrences, and `type_count` reads 21,644 bigrams instead of 21,684.
+  `test_tier_swap_consistency.py` doesn't catch it because its fixtures are short.
+  `docs/hosting.md` §3 recommends replacing the table with an exact `lead()`
+  query over `main_token`.
+- **The data plane does not enforce private corpora.** No FastAPI endpoint
+  checks `Corpus.is_public`, and `resolve_document_ids` never reads it, so any
+  logged-in user can run every analysis on a private corpus by passing its ID.
+  Only the two Django surfaces enforce the rule, and no data plane test covers
+  it. The fix, which must land before any shared cache, is in
+  `docs/caching-plan.md` §6.1.
 
 - **`TUFS.csv` (document #20 in `corpus_db`) is the author-survey spreadsheet,
   uploaded as a document into `DEMO_CORPUS`** on 2026-10-13. It has never been

@@ -3,11 +3,15 @@
 > Start here. Get a machine running, understand the configuration, and know
 > what a handover has to decide. Describes what exists — not a redesign.
 >
-> **The other three docs:**
+> **The other docs:**
 > - `docs/feature-list.md` — every feature, the architecture overview, the
 >   codebase map, RBAC, and how to add a feature.
 > - `docs/data-processing.md` — storage, the indexing pipeline, the metadata
 >   catalogues, how queries are built, performance limits and planned work.
+> - `docs/hosting.md` — measured storage and query costs, and what server each
+>   size of deployment needs.
+> - `docs/caching-plan.md` — the Phase 8 result cache: designed but deferred
+>   until it's justified, with the evidence and the triggers for building it.
 > - `docs/CHANGELOG.md` — what landed when.
 >
 > For setting up a machine from zero with Windows commands and a troubleshooting
@@ -266,7 +270,10 @@ data plane tests fail. The data plane fixture **refuses a `DB_NAME` without
   a catalogue file. Fresh databases don't have it. See
   `docs/data-processing.md` §7.
 - Phase 8 (caching, retiring the superseded Django live-parse views) is not
-  started.
+  started. The cache is designed but deferred (`docs/caching-plan.md` §1).
+- **The FastAPI data plane does not enforce private corpora.** Any logged-in
+  user can analyse a private corpus by passing its ID. See
+  `docs/data-processing.md` §9, open defects.
 - KUIS-FE controls for the `gender`/`mother_tongue` facets are not built; the API
   serves them and the Django surface renders them.
 - `KUIS-FE/README.md`'s phase table is stale (describes dashboard pages as stubs).

@@ -81,7 +81,7 @@ Access column: **anyone** · **registered** (any logged-in active user) ·
 | **Create / edit / delete corpus** | **admin** | Name + description, public/private toggle, tick existing files and/or upload new XML inline. Deleting a corpus keeps its files | `main/views.py` (`corpus_create`, `corpus_edit`, `corpus_delete`), `main/forms.py::CorpusForm` |
 | **Bulk assign** | **admin** | Many files → many corpora in one submit, from a modal | `main/views.py::corpus_assign`, `components/assign_modal.html` |
 | **Document upload** | **admin** | Standalone single-file upload (paste text or a UTF-8 file). Content-hash deduped, then indexed asynchronously | `main/views.py::upload_document`, `main/document_ingest.py` |
-| **Public / private corpora** | **admin** sets | `Corpus.is_public` (`default=True`). Private → staff only, and a private corpus requested by a non-staff user is a **404, not a 403** — a 403 would confirm it exists. Enforced independently on both surfaces | `main/models.py`, `main/views.py`, `main/api_corpus.py`, migration `0011` |
+| **Public / private corpora** | **admin** sets | `Corpus.is_public` (`default=True`). Private → staff only, and a private corpus requested by a non-staff user is a **404, not a 403** — a 403 would confirm it exists. Enforced on the Django views and the Django REST API; **not yet on the FastAPI data plane** (`docs/caching-plan.md` §6.1) | `main/models.py`, `main/views.py`, `main/api_corpus.py`, migration `0011` |
 | **Django Admin** | **admin** | `Document`, `Corpus`, `ErrorTaxonomyNode`, `ErrorAnnotation`, `DocumentErrorFreq` registered. `UserProfile` and `DocumentMetadata` are **not** | `main/admin.py` |
 
 ---
@@ -388,7 +388,7 @@ info/                  — NOT code: error.xml (the taxonomy source), two sample
                          corpus XML files, a proposal PDF, informal notes,
                          new_device.md and quickstart.md
 docs/                  — ONBOARDING.md, this file, data-processing.md,
-                         CHANGELOG.md
+                         hosting.md, caching-plan.md, CHANGELOG.md
 docker/                — django / fastapi / worker Dockerfiles
 ```
 
