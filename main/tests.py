@@ -3206,6 +3206,40 @@ class LoadAuthorMetadataCommandTests(TestCase):
         self.assertTrue(Author.objects.filter(university='OU', name_code='MADA').exists())
         self.assertFalse(Author.objects.filter(university='Osaka').exists())
 
+    def test_spelled_out_and_class_suffixed_universities_map_to_codes(self):
+        """Every University spelling in the real survey CSVs, including the
+        class suffixes Sophia and Keio carry, lands on the catalogue code."""
+        from .author_metadata import UNIVERSITY_ALIASES, normalize_text
+
+        expected = {
+            'APU': 'APU', 'Chuo': 'CHU', 'Keio': 'SFC', 'Keio-Intensif 2': 'SFC',
+            'Sophia': 'SOP', 'Sophia-初': 'SOP', 'Sophia-中': 'SOP',
+        }
+        for raw, code in expected.items():
+            self.assertEqual(UNIVERSITY_ALIASES.get(normalize_text(raw).lower()), code, raw)
+
+    def test_unidentified_is_read_as_not_recorded(self):
+        """'Unidentified' must not become a gender or a tongue, nor conflict
+        with a real value from the same person's other survey."""
+        from .models import Author
+
+        self.csv_path = _write_csv(self.tmpdir, 'SFC.csv', '\r\n'.join([
+            AUTHOR_CSV_HEADER,
+            'YAKI,2023,Keio,,Unidentified,1,,Unidentified,,,,,,,,,,3,,',
+            'YAKI,2024/4/30,Keio,19,Male,1,,Japanese,,,,,,,,,,3,,',
+            'RISHI,2023,Keio,,Unidentified,1,,Unidentified,,,,,,,,,,3,,',
+        ]))
+        self._run(expect_error=False)
+
+        yaki = Author.objects.get(university='SFC', name_code='YAKI')
+        self.assertEqual(yaki.gender, 'Male')
+        self.assertFalse(yaki.has_conflict)
+        self.assertEqual(list(yaki.mother_tongues.values_list('tongue', flat=True)), ['Japanese'])
+
+        rishi = Author.objects.get(university='SFC', name_code='RISHI')
+        self.assertIsNone(rishi.gender)
+        self.assertFalse(rishi.mother_tongues.exists())
+
     def test_an_unknown_university_is_an_error_not_a_silent_pass_through(self):
         from .models import Author
 
@@ -3476,10 +3510,11 @@ class LoadAuthorMetadataCommandTests(TestCase):
         with self.assertRaises(CommandError):
             call_command('load_author_metadata', stdout=out)
 
-        # 439 survey rows across the three files collapse to 235 people.
-        self.assertEqual(Author.objects.count(), 235)
-        # 225 of them have a tongue; NEGSEI has two.
-        self.assertEqual(AuthorMotherTongue.objects.count(), 226)
+        # 930 survey rows across the seven files collapse to 659 people.
+        self.assertEqual(Author.objects.count(), 659)
+        # Tongue rows, after 'Unidentified' is read as blank; NEGSEI and a
+        # few SOP/SFC writers have more than one.
+        self.assertEqual(AuthorMotherTongue.objects.count(), 636)
         # order_by('tongue') before values_list is required, not stylistic:
         # Meta.ordering is ['author', 'tongue'], and ORDER BY columns join the
         # SELECT, which defeats .distinct(). facet_values() does the same.
@@ -3490,12 +3525,13 @@ class LoadAuthorMetadataCommandTests(TestCase):
                 .values_list('tongue', flat=True)
                 .distinct()
             ),
-            ['Arabic', 'Japanese', 'Korean', 'Malay', 'Tagalog'],
+            ['Arabic', 'Cantonese', 'Chinese', 'English', 'French', 'Japanese',
+             'Korean', 'Malay', 'Mandarin', 'Tagalog', 'Thai', 'Vietnamese'],
         )
         # The two real inconsistencies, and only those two.
         self.assertEqual(
             sorted(str(a) for a in Author.objects.filter(has_conflict=True)),
-            ['KUIS/KONA', 'TUFS/NEGSEI'],
+            ['SOP/NAYU', 'TUFS/NEGSEI'],
         )
 
 

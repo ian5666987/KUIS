@@ -14,16 +14,16 @@ HASAI,2024/01/18,TUFS,22,Male,3,Indonesian,Japanese,1 year(s)9 month(s),Arabic,1
 HASAI,2025/11/27,TUFS,22,Male,2,Indonesian,Japanese,4 year(s)6 month(s),Arabic,4 year(s)6 month(s),English,12 year(s),B Level,August 2025,Jakarta,8 month(s),4,語彙力があまりないから,Because I don't have much vocabulary
 HAMA,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),Korean,6 month(s),Chinese,2 month(s),,,,,3,わからない単語がまだ多いから。-kanなどの活用の知識が不足しているから。,Because there are still many words I don't know. Because I lack knowledge of conjugations like -kan.
 HAMA,2024/01/18,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)10 month(s),Chinese,1 year(s),Polish,8 month(s),,,Yogyakarta,1 week(s),3,文法がシンプルだから,Because the grammar is simple
-HOMTAK,2023/6/22,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),French,2カ月,,,,,,,3,,
+HOMTAK,2023/6/22,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),French,2 month(s),,,,,,,3,,
 HOMTAK,2024/01/18,TUFS,20,Male,2,Indonesian,Japanese,1 year(s)9 month(s),French,9 month(s),English,8 year(s),,,,,3,文法が他言語に比べると簡単で書きやすいが、自分の単語力が豊かでないため簡単とは言えない,"The grammar is easy to write with compared to other languages, but since my vocabulary isn't rich, I can't say it's easy"
 SUGCHIN,2023/5/11,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),English,10 year(s),,,,,,,4,動詞の変化が難しい,Verb changes are difficult
-SUGCHIN,2024/01/25,TUFS,20,Female,2,Indonesian,Japanese,約2 year(s),English,9 year(s),,,,,Bali,0.5 month(s),4,接頭語、接尾語の使い分けが難しいため,Because it's difficult to distinguish when to use which prefix and suffix
+SUGCHIN,2024/01/25,TUFS,20,Female,2,Indonesian,Japanese,2 year(s),English,9 year(s),,,,,Bali,0.5 month(s),4,接頭語、接尾語の使い分けが難しいため,Because it's difficult to distinguish when to use which prefix and suffix
 MANSOT,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),English,7 year(s),,,,,,,4,単語をあまり覚えていないから,Because I haven't memorized many words
 MANSOT,2024/01/18,TUFS,20,Male,2,Indonesian,Japanese,1 year(s)9 month(s),English,7 year(s),,,,,,,5,わからない単語が多いから,Because there are many words I don't know
 SAITOSH,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),English,14 year(s),Chinese,6 month(s),,,,,4,文構造を考えながら文章を組み立てるのが難しい為,Because it's difficult to build sentences while thinking about sentence structure
 SAITOSH,2025/4/24,TUFS,21,Male,4,Indonesian,Japanese,3 year(s),English,20 year(s),Cantonese,10 year(s),,,,,4,フォーマルな語彙が見つからなかったり、わからなかったりして、構文や構成については時に困難は感じていないが、語彙力に難しさを覚えているため。,"I sometimes can't find or don't know formal vocabulary. I don't feel much difficulty with syntax or structure, but I find vocabulary difficult."
 NEGSEI,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese、Malay,1 year(s),French,3 year(s),,,,,,,3,マレーシア語とある程度共通しているから,Because it has some things in common with Malay
-NEGSEI,2024/01/18,TUFS,20,Male,2,Indonesian,Japanese、Malay,2 year(s),French,4 year(s),Malay,20 year(s),,,,,2,マレーシア語と共通する要素が多いから,Because it has many elements in common with Malay
+NEGSEI,2024/01/18,TUFS,20,Male,2,Indonesian,Malay,2 year(s),French,4 year(s),Malay,20 year(s),,,,,2,マレーシア語と共通する要素が多いから,Because it has many elements in common with Malay
 SEKSHI,2023/5/11,TUFS,20,Female,2,,Japanese,1 year(s),English,7 year(s),,,,,,,4,動詞の変化が難しい,Verb changes are difficult
 HIRIT,2023/5/11,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)1 month(s),English,6 year(s),,,,,,,4,英語等と比べて、参考にするものが少ない,"Compared to English and others, there are fewer resources to refer to"
 HIRIT,2024/01/18,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)9 month(s),English,7 year(s)9 month(s),,,,,,,4,接頭辞の使い方を迷う,I'm unsure how to use prefixes
@@ -48,11 +48,11 @@ OGYU,2023/5/18,TUFS,20,Male,3,Indonesian,Japanese,2 year(s),English,8 year(s),Ko
 NAKTAK,2023/5/18,TUFS,20,Male,3,Indonesian,Japanese,2 year(s),,,,,,,,,3,複雑な文章を書きたい時に、何を主語として扱うかをよく迷ってしまうからである,"Because when I want to write complex sentences, I'm often unsure what to treat as the subject"
 NAKYO,2023/5/18,TUFS,21,Male,3,Indonesian,Tagalog,2 year(s),English,14 year(s),,,,,,,3,-nyaの使い分けが難しい,Using -nya correctly is difficult
 MIYAK,2023/5/18,TUFS,21,Male,3,Indonesian,Japanese,2 year(s)2 month(s),English,8 year(s),Portuguese,1 year(s),,,Jakarta,0 month(s),4,語彙力,Vocabulary
-HOKOU,,TUFS,,,,,,,,,,,,,,,,,
+HOKOU,,TUFS,,Male,,,Japanese,,,,,,,,,,,,
 NIRA,2024/01/18,TUFS,21,Female,3,Indonesian,Japanese,3 year(s),English,15 year(s),Korean,2 year(s),,,,,4,接頭、接尾辞のしくみをいまいち覚えて使いこなせていないため,Because I haven't fully learned or mastered how prefixes and suffixes work
 TAKMI,2024/01/18,TUFS,21,Female,3,Indonesian,Japanese,3 year(s),English,8 year(s),Korean,2 year(s),,,,,3,知らない単語が多く、調べなくてはいけないから。一通り文法は学習したが、完璧には定着していないから,"Because there are many words I don't know and have to look up. I've studied the grammar once through, but it hasn't fully stuck"
 ININ,2024/01/18,TUFS,22,Female,4,Indonesian,Japanese,3 year(s)10 month(s),English,15 year(s),,,,,Yogyakarta,1 year(s),4,意味の似た単語のニュアンスのちがいをつかむのが難しい,Grasping the differences in nuance between words with similar meanings is difficult
-RISHI,,TUFS,,,,,,,,,,,,,,,,,
+RISHI,,TUFS,,Unidentified,,,Unidentified,,,,,,,,,,,,
 KAUZ,2024/01/18,TUFS,22,Female,3,Indonesian,Japanese,3 year(s),English,14 year(s),Korean,2 year(s),,,,,5,インドネシア語の単語や文法がむずかしい。活用がややこしい,Indonesian words and grammar are difficult. The conjugation is confusing
 RATAK,2024/01/18,TUFS,20,Male,3,Indonesian,Japanese,3 year(s),English,9 year(s),Chinese,1 year(s),,,"Central Java、Singgahan, Nganget",1 month(s),4,1つの前置詞がたくさんの意味を持っているように思えて使うのが難しい,"A single preposition seems to have many meanings, which makes it hard to use"
 UYAK,2024/01/18,TUFS,22,Female,4,Indonesian,Japanese,3 year(s),English,12 year(s),Korean,1 year(s),,,,,4,語彙（特に語幹になる基語）が乏しいため,Because my vocabulary (especially of root words) is poor
@@ -62,7 +62,7 @@ TAKS,2025/4/24,TUFS,20,Male,3,Indonesian,Japanese,2 year(s),English,8 year(s),Ch
 YESH,2024/4/25,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)1 month(s),English,7 year(s),,,,,,,2,語順や単語を覚えれば比較的難しく考えることはないように感じる,"I feel that once you learn the word order and words, it's not something to think of as particularly difficult"
 YESH,2024/12/12,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)8 month(s),,,,,,,,,3,文法事項は特別難しくはないが、特有の表現などは数が尽きないため,"The grammar isn't especially difficult, but there's no end to the number of unique expressions"
 YESH,2025/4/24,TUFS,20,Male,3,Indonesian,Japanese,2 year(s),,,,,,,,,3,,
-KIRK,2024/4/25,TUFS,26,Male,2,"School of International and Area Studies, Southeast Asia 1",Japanese,1 year(s)1 month(s),English,約10 year(s),,,,,,,5,単語の知識不足。派生した語の語幹を調べる手段が弱い（時間がかかる）,Lack of vocabulary knowledge. My ways of looking up the root of derived words are weak (it takes time)
+KIRK,2024/4/25,TUFS,26,Male,2,"School of International and Area Studies, Southeast Asia 1",Japanese,1 year(s)1 month(s),English,10 year(s),,,,,,,5,単語の知識不足。派生した語の語幹を調べる手段が弱い（時間がかかる）,Lack of vocabulary knowledge. My ways of looking up the root of derived words are weak (it takes time)
 KIRK,2024/12/12,TUFS,27,Male,2,School of International and Area Studies,Japanese,1 year(s)6 month(s),,,,,,,,,4,men等の接頭辞や接尾辞とそれによる変化が作文を難しくしている気がする,I feel that prefixes and suffixes like men- and the changes they cause make writing difficult
 ROAM,2024/4/25,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),English,6 year(s),,,,,,,4,言葉がすぐに思い浮かばない,Words don't come to mind right away
 KANT,2024/4/25,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),English,7 year(s),,,,,,,5,まだ知らない単語が多く、また調べようとしてもネットでは確実な情報が出てこないから,"Because there are still many words I don't know, and even when I try to look them up, I can't find reliable information online"
@@ -81,7 +81,7 @@ RYON,2024/12/12,TUFS,20,Male,2,Indonesian,Japanese,2 year(s),Arabic,6 month(s),,
 RYON,2025/4/24,TUFS,20,Male,3,Indonesian,Japanese,5 year(s),Arabic,1 year(s),English,12 year(s),C Level,July 2024,Jakarta ,3 year(s)3 month(s),4,文法的に正しいインドネシア語と普段の会話で使われるインドネシア語の差異が大きく、つい文法的に正確でない文章をかいてしまうため。,"Because there's a big difference between grammatically correct Indonesian and the Indonesian used in everyday conversation, and I end up writing sentences that aren't grammatically accurate."
 NANU,2024/4/25,TUFS,20,Female,3,"School of International and Area Studies, Oceania",Japanese,1 year(s),English,9 year(s),,,,,,,4,単語がまだあまり覚えられていないから,Because I haven't memorized many words yet
 NAEF,2024/4/25,TUFS,20,Female,3,"School of International and Area Studies, Oceania (English)",Japanese,1 year(s),Chinese,1 year(s),,,,,,,3,単語を調べたり、文法を考えるのに時間がかかることがあるから,Because it sometimes takes time to look up words and think about grammar
-CHID,2024/4/25,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),Chinese,2､3 year(s),English,10 year(s),,,,,5,文法や単語が身についていないから,Because I haven't mastered the grammar and vocabulary
+CHID,2024/4/25,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),Chinese,2.5 year(s),English,10 year(s),,,,,5,文法や単語が身についていないから,Because I haven't mastered the grammar and vocabulary
 SHOM,2024/4/25,TUFS,19,Male,2,Indonesian,Japanese,1 year(s),English,7 year(s)1 month(s),Chinese,0 year(s)1 month(s),,,,,3,文法自体は、ある程度の知識が身についているため頭を悩ますことはないが、単語を覚えるのに難しさを感じるため,"I've acquired a certain amount of knowledge about grammar itself, so that doesn't trouble me, but I find memorizing words difficult"
 SHOM,2024/12/12,TUFS,20,Male,2,Indonesian,Japanese,1 year(s)8 month(s),English,7 year(s),Chinese,8 month(s),,,,,5,meN-形やdi形の区別が難しい,Distinguishing between the meN- form and the di- form is difficult
 SHOM,2025/4/24,TUFS,20,Male,3,Indonesian,Japanese,2 year(s)1 month(s),English,6 year(s),Chinese,1 year(s),,,Jakarta,1 month(s),5,,
@@ -105,13 +105,13 @@ NORM,2024/4/25,TUFS,19,Male,2,Indonesian,Japanese,1 year(s)1 month(s),English,7 
 NORM,2024/12/12,TUFS,20,Male,2,Indonesian,Japanese,1 year(s)9 month(s),English,7 year(s)9 month(s),French,9 month(s),,,,,2,単語がわからないことが多いが、文法的な面で単語の並べ方がわからないなどといったことはあまりないから。,"Because I often don't know the words, but I don't really have grammatical problems like not knowing how to order words."
 NORM,2025/4/24,TUFS,20,Male,3,Indonesian,Japanese,2 year(s)1 month(s),English,8 year(s)1 month(s),French,1 year(s),,,Jakarta・Yogyakarta,1 month(s),3,文法的な面で困ることは少ないが、単語が出てこずに思ったことをそのまま書けないことが多々ある。,"I rarely have trouble with grammar, but words often don't come to me, so I can't write what I think as it is."
 KITS,,TUFS,22,Female,2,Indonesian,Japanese,2 year(s),Korean,1 year(s),French,1 year(s),,,,,4,どの言語でもそうですが、読むことが出来てもいざ自分で出すとなると出てこない,"It's true of any language, but even if I can read it, when I actually have to produce it myself, it doesn't come out"
-ZOAR,2024/12/12,TUFS,20,Female,2,Indonesian,Japanese,8 month(s),Chinese,８ヵ月,,,,,,,5,語彙力が足りないことと、主語によって単語の使い分けができていない。,"My vocabulary is insufficient, and I can't choose the right words depending on the subject."
+ZOAR,2024/12/12,TUFS,20,Female,2,Indonesian,Japanese,8 month(s),Chinese,８ month(s),,,,,,,5,語彙力が足りないことと、主語によって単語の使い分けができていない。,"My vocabulary is insufficient, and I can't choose the right words depending on the subject."
 ZOAR,2025/4/24,TUFS,21,Female,3,Indonesian,Japanese,3 year(s),English,7 year(s),,,,,,,4,似ている意味の単語でも、主語や目的語によって使い分けなければいけないものがあるから。,Because even words with similar meanings sometimes have to be used differently depending on the subject or object.
 TIDE,2024/12/12,TUFS,20,Female,2,Indonesian,Japanese,1 year(s)8 month(s),Korean,8 month(s),,,,,,,5,単語が思い出せない。文法がわからない,I can't remember words. I don't understand the grammar
-NASE,,TUFS,,,,,,,,,,,,,,,,,
-AKOM,,TUFS,,,,,,,,,,,,,,,,,
-LIAM,,TUFS,,,,,,,,,,,,,,,,,
-TUMO,,TUFS,,,,,,,,,,,,,,,,,
+NASE,2024,TUFS,,Female,3,,Unidentified,,,,,,,,,,,,
+AKOM,2024,TUFS,,Female,3,,Unidentified,,,,,,,,,,,,
+LIAM,2024,TUFS,,Female,2,,Unidentified,,,,,,,,,,,,
+TUMO,2024,TUFS,,Female,4,,Unidentified,,,,,,,,,,,,
 FUKO,2025/4/17,TUFS,19,Male,2,Indonesian,Japanese,2 year(s),English,8 year(s),Spanish,2 year(s),,,,,3,口語との乖離や、語順の自由な変化が難しい,The gap with the spoken language and the freely changing word order are difficult
 FUKO,2025/11/27,TUFS,20,Male,2,Indonesian,Japanese,3 year(s),English,8 year(s),Spanish,3 year(s)10 month(s),,,Yogyakarta,0.2 month(s),2,文法が自由かつシンプルなので文章を作る時に考えることが少なく、かつ表現の幅も広いと感じるから,"Because the grammar is free and simple, there's less to think about when making sentences, and I feel the range of expression is wide"
 RIRK,2025/4/17,TUFS,19,Female,2,Indonesian,Japanese,1 year(s),English,7 year(s),,,,,,,4,単語力が不足しているから、表現するのが難しい。スペルミスが「e」と「u」とか、「r」と「l」とかで起きやすいから。後ろに修飾語がくる文法が難しいから。,"It's hard to express myself because I lack vocabulary. I tend to make spelling mistakes between ""e"" and ""u"" or ""r"" and ""l"". The grammar where modifiers come after the word is difficult."
@@ -147,5 +147,5 @@ IGYU,2025/4/17,TUFS,21,Male,2,Indonesian,Japanese,1 year(s),English,9 year(s),,,
 IGYU,2025/11/27,TUFS,21,Male,2,Indonesian,Japanese,1 year(s)8 month(s),English,9 year(s),,,,,,,5,単語を知らないから,Because I don't know the words
 MEGI,2025/11/27,TUFS,19,Female,2,Indonesian,Japanese,2 year(s),Korean,3 year(s),,,,,Bali,1 month(s),4,動詞の活用が難しく、どの場合にどれを使用するのか悩むことが多いため。,"Because verb conjugation is difficult, and I often struggle over which form to use in which case."
 ARIK,2025/11/27,TUFS,,Male,2,,Japanese,1 year(s),English,15 year(s),,,,,,,4,,
-MISY,,TUFS,,,,,,,,,,,,,,,,,
-YUIY,,TUFS,,,,,,,,,,,,,,,,,
+MISY,2024,TUFS,,Female,1,,Unidentified,,,,,,,,,,,,
+YUIY,2024,TUFS,,Unidentified,1,,Unidentified,,,,,,,,,,,,

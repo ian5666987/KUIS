@@ -678,9 +678,12 @@ document" rule correctly hides them.
   columns in **100% of rows, zero mismatches**. But the columns already carry that
   information, indexed and verified, so a parser would add a failure mode for no
   gain — and it keeps the no-heuristics policy of §6 intact.
-- **`Osaka` maps to `OU`, and an unmapped university is an error.** The surveys
-  spell the university out; the catalogue uses the filename prefix.
-  `UNIVERSITY_ALIASES` reconciles them. An unrecognised value **skips the row and
+- **Spelled-out universities map to the catalogue code, and an unmapped one is an
+  error.** The surveys spell the university out; the catalogue uses the filename
+  prefix, which is also each survey CSV's name. `UNIVERSITY_ALIASES` reconciles
+  them: `Osaka` → `OU`, `Chuo` → `CHU`, `Keio` / `Keio-Intensif 2` → `SFC`,
+  `Sophia` / `Sophia-初` / `Sophia-中` → `SOP` (the suffixes name a class level,
+  not a university, and are not stored). An unrecognised value **skips the row and
   exits non-zero**: an author under an unknown university can never link to a file
   and would contribute nothing to any facet — a failure with no symptom.
 - **Only the two traits the filter exposes are stored at all.** An earlier revision
@@ -816,6 +819,12 @@ python manage.py load_author_metadata --dry-run
 *(The duration and date rows are moot twice over: those columns are no longer
 imported at all. A malformed duration in a column nothing queries is not
 something to ask the data owner to fix.)*
+
+**`Unidentified` is read as a blank** (`NOT_RECORDED` in
+`main/author_metadata.py`). The 2026-10 re-export filled empty Gender and Mother
+tongues cells with it; stored literally it would surface as its own gender and
+tongue beside "(no value)", and it turned `SFC/YAKI` (`Unidentified` in 2023,
+`Male` in 2024) into a false gender conflict.
 
 **Blanks** are a legitimate "not recorded" and import cleanly. **11 authors still
 have no gender** and 10 no mother tongue — these are blanks, not conflicts, and

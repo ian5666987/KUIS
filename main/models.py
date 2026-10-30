@@ -351,9 +351,9 @@ class DocumentMetadata(models.Model):
 
     # The person who wrote this file, resolved from (university, name_code)
     # against the survey CSVs (docs/data-processing.md). Nullable for the
-    # same reason `document` is, and then some: four of the seven universities
-    # (APU, CHU, SFC, SOP) have no survey data at all, so ~53% of the
-    # catalogue is legitimately author-less. NULL here is what the filter's
+    # same reason `document` is: a few catalogue name codes have no survey
+    # row, and surveys and catalogue are loaded independently, so a link can
+    # be pending. NULL here is what the filter's
     # "(not specified)" option selects, via the same LEFT OUTER JOIN that
     # already makes a missing catalogue row and an empty field equivalent.
     #

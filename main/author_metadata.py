@@ -78,7 +78,11 @@ AUTHOR_CSV_FIELD_MAP = {
 
 REQUIRED_CSV_HEADERS = ('name code', 'university')
 
-# The survey CSVs spell Osaka out; the catalogue uses the filename prefix.
+# The survey CSVs spell universities out; the catalogue uses the filename
+# prefix, which is also each survey CSV's own name (metadata/authors/SOP.csv).
+# Keys are normalize_text()'d and lowercased. Sophia and Keio carry a class
+# suffix (Sophia-初 / Sophia-中 = beginner / intermediate, Keio-Intensif 2)
+# that names a course, not a university, so every variant maps to one code.
 # An unmapped university is an ERROR rather than a pass-through: it would
 # create an author that can never link to a file, and silently contribute
 # nothing to the facets — a failure with no symptom.
@@ -87,7 +91,24 @@ UNIVERSITY_ALIASES = {
     'tufs': 'TUFS',
     'osaka': 'OU',
     'ou': 'OU',
+    'apu': 'APU',
+    'chuo': 'CHU',
+    'chu': 'CHU',
+    'keio': 'SFC',
+    'keio-intensif 2': 'SFC',
+    'sfc': 'SFC',
+    'sophia': 'SOP',
+    'sophia-初': 'SOP',
+    'sophia-中': 'SOP',
+    'sop': 'SOP',
 }
+
+# Cell values that mean "not recorded", compared after normalize_text() and
+# lowercasing. The 2026-10 re-export filled blank Gender / Mother tongues
+# cells with 'Unidentified'; taken literally it would become a gender and a
+# mother tongue of its own in the filters, beside "(not specified)", and turn
+# a known Male into a gender conflict (SFC/YAKI). Read as blank instead.
+NOT_RECORDED = frozenset({'unidentified'})
 
 # Mother tongues are multi-valued in the source with no single separator: the
 # ideographic comma, the katakana middle dot and the ASCII comma all appear,
@@ -170,6 +191,10 @@ def _coerce_row(raw, line_number, source_file, report):
         # on the last column when a reader doesn't eat them — the exact bug
         # that put 'KOMSHI\r' in the catalogue's name codes.
         values[target] = (value or '').strip()
+
+    for name in ('gender', 'mother_tongues_raw'):
+        if normalize_text(values.get(name, '')).lower() in NOT_RECORDED:
+            values[name] = ''
 
     name_code = values.get('name_code', '')
     if not name_code:
@@ -366,9 +391,8 @@ def import_author_rows(rows, source_file, dry_run=False):
 def catalogue_codes_without_authors():
     """(university, name_code) pairs that have catalogue files but no author.
 
-    Reported so coverage gaps are visible: KUIS/WAMO has files and no survey
-    row, and four whole universities (APU, CHU, SFC, SOP) have no survey data
-    at all — which is why ~53% of the corpus is legitimately author-less.
+    Reported so coverage gaps are visible: a handful of catalogue codes
+    (KUIS/WAKMOM, APU/KOHAR, APU/MYNK) have files and no survey row.
     """
     missing = (
         DocumentMetadata.objects
